@@ -614,6 +614,162 @@
                 </Modal>
             );
         };
+
+        const ManageDemandItemsModal = ({ isOpen, onClose, onSave, demandToEdit, products }) => {
+            const [items, setItems] = React.useState([]);
+            const [originalItemIds, setOriginalItemIds] = React.useState(new Set());
+            const [error, setError] = React.useState('');
+            const [isLoading, setIsLoading] = React.useState(false);
+
+            React.useEffect(() => {
+                if (demandToEdit) {
+                    const initialItems = demandToEdit.demand_item.map(item => ({ 
+                        ...item, 
+                        productid: item.product.id, // Ensure productid is set for the select
+                        key: crypto.randomUUID() 
+                    }));
+                    setItems(initialItems);
+                    setOriginalItemIds(new Set(initialItems.map(item => item.id)));
+                }
+            }, [demandToEdit]);
+
+            if (!demandToEdit) return null;
+
+            const handleAddItem = () => {
+                setItems([...items, { productid: '', quantity: '', demand_admin_note: '', supply_admin_note: '', key: crypto.randomUUID() }]);
+            };
+
+            const handleItemChange = (index, field, value) => {
+                const newItems = [...items];
+                newItems[index][field] = value;
+                setItems(newItems);
+            };
+
+            const handleRemoveItem = (index) => {
+                setItems(items.filter((_, i) => i !== index));
+            };
+
+            const handleSubmit = async (e) => {
+                e.preventDefault();
+                if (items.length === 0 || items.some(i => !i.productid || !i.quantity)) {
+                    setError('لطفا تمام کالاها را انتخاب کرده و تعداد آنها را مشخص کنید.');
+                    return;
+                }
+                
+                setIsLoading(true);
+                setError('');
+
+                try {
+                    const finalItemIds = new Set(items.filter(i => i.id).map(i => i.id));
+                    const itemIdsToDelete = [...originalItemIds].filter(id => !finalItemIds.has(id));
+                    
+                    // 1. Delete items that were removed
+                    if (itemIdsToDelete.length > 0) {
+                        await supabaseClient.from('demandstatuslog').delete().in('demand_item_id', itemIdsToDelete);
+                        const { error: deleteError } = await supabaseClient.from('demand_item').delete().in('id', itemIdsToDelete);
+                        if (deleteError) throw deleteError;
+                    }
+
+                    const itemsToAdd = items.filter(item => !item.id);
+                    const itemsToUpdate = items.filter(item => item.id && originalItemIds.has(item.id));
+
+                    // 2. Add new items
+                    if (itemsToAdd.length > 0) {
+                        const newItemsData = itemsToAdd.map(item => ({
+                            demandid: demandToEdit.id,
+                            productid: item.productid,
+                            quantity: Number(item.quantity),
+                            demand_admin_note: item.demand_admin_note,
+                            supply_admin_note: item.supply_admin_note,
+                            demandstatusid: 12 // Default status: 'در انتظار تامین'
+                        }));
+                        const { data: insertedItems, error: addError } = await supabaseClient.from('demand_item').insert(newItemsData).select();
+                        if (addError) throw addError;
+
+                        const logsToInsert = insertedItems.map(item => ({ demand_item_id: item.id, demandstatusid: 12 }));
+                         if (logsToInsert.length > 0) {
+                            const { error: logError } = await supabaseClient.from('demandstatuslog').insert(logsToInsert);
+                            if (logError) console.error("Error logging status for new items:", logError);
+                        }
+                    }
+                    
+                    // 3. Update existing items
+                    if (itemsToUpdate.length > 0) {
+                       const updatePromises = itemsToUpdate.map(item => 
+                            supabaseClient.from('demand_item').update({
+                                quantity: Number(item.quantity),
+                                demand_admin_note: item.demand_admin_note,
+                                supply_admin_note: item.supply_admin_note,
+                                productid: item.productid,
+                            }).eq('id', item.id)
+                        );
+                        const results = await Promise.all(updatePromises);
+                        results.forEach(({ error }) => {
+                            if (error) throw error;
+                        });
+                    }
+
+                    onSave();
+                } catch(err) {
+                    console.error("Error managing demand items:", err);
+                    setError(`خطا در ذخیره تغییرات: ${err.message}`);
+                } finally {
+                    setIsLoading(false);
+                }
+            };
+
+             const productOptions = products.map(p => {
+                const telegramCodeProp = p.productproperty?.find(
+                     prop => prop.propertykey?.title?.toLowerCase().includes('تلگرام')
+                );
+                const telegramCode = telegramCodeProp ? telegramCodeProp.value : '';
+                const displayTitle = `${telegramCode ? `[${telegramCode}] ` : ''}${p.brand ? p.brand.title + ' ' : ''}${p.title}`;
+                return { id: p.id, title: displayTitle };
+            });
+
+            return (
+                <Modal isOpen={isOpen} onClose={onClose} title={`مدیریت اقلام تقاضای ${demandToEdit.profiles.fullname}`}>
+                    <form onSubmit={handleSubmit} className="space-y-6">
+                        <div className="p-3 bg-gray-100 dark:bg-gray-900 rounded-lg text-sm">
+                            <p><span className="font-semibold">شناسه تقاضا:</span> {demandToEdit.id}</p>
+                            <p><span className="font-semibold">تاریخ ثبت:</span> {formatDateTime(demandToEdit.createdat)}</p>
+                        </div>
+                        <div className="border-t border-gray-200 dark:border-gray-700 pt-4">
+                            <h3 className="text-lg font-semibold mb-2">اقلام درخواستی</h3>
+                            <div className="space-y-3">
+                                {items.map((item, index) => (
+                                    <div key={item.key} className="p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
+                                        <div className="grid grid-cols-1 md:grid-cols-5 items-end gap-x-4 gap-y-2">
+                                            <div className="md:col-span-3">
+                                                <label className="text-xs text-gray-500 dark:text-gray-400">محصول</label>
+                                                <SearchableSelect options={productOptions} value={item.productid} onChange={(id) => handleItemChange(index, 'productid', id)} placeholder="جستجوی محصول با نام یا کد..." />
+                                            </div>
+                                            <div className="md:col-span-1">
+                                                <label className="text-xs text-gray-500 dark:text-gray-400">تعداد</label>
+                                                <input type="number" value={item.quantity} onChange={(e) => handleItemChange(index, 'quantity', e.target.value)} className="w-full bg-white dark:bg-gray-600 p-2 rounded-lg" placeholder="تعداد" min="1" />
+                                            </div>
+                                            <div className="flex justify-end"><button type="button" onClick={() => handleRemoveItem(index)} className="text-red-500 hover:text-red-700 p-2">✕</button></div>
+                                        </div>
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-2">
+                                            <textarea value={item.demand_admin_note || ''} onChange={(e) => handleItemChange(index, 'demand_admin_note', e.target.value)} placeholder="یادداشت مدیر تقاضا..." className="w-full text-sm bg-white dark:bg-gray-600 p-2 rounded-lg" rows="2"></textarea>
+                                            <textarea value={item.supply_admin_note || ''} onChange={(e) => handleItemChange(index, 'supply_admin_note', e.target.value)} placeholder="یادداشت مدیر تامین..." className="w-full text-sm bg-white dark:bg-gray-600 p-2 rounded-lg" rows="2"></textarea>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                            <button type="button" onClick={handleAddItem} className="mt-4 w-full text-center py-2 px-4 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition">+ افزودن کالا</button>
+                        </div>
+                        
+                        {error && <p className="text-red-500 text-sm">{error}</p>}
+
+                        <div className="flex justify-end gap-4 pt-4 border-t border-gray-200 dark:border-gray-700">
+                            <button type="button" onClick={onClose} className="bg-gray-200 dark:bg-gray-600 py-2 px-5 rounded-lg font-semibold">بازگشت</button>
+                            <button type="submit" disabled={isLoading} className="bg-indigo-600 text-white py-2 px-5 rounded-lg font-semibold disabled:bg-indigo-400">{isLoading ? 'در حال ذخیره...' : 'ذخیره تغییرات'}</button>
+                        </div>
+                    </form>
+                </Modal>
+            );
+        };
         
         // ==================================================
         // The Standalone Component
@@ -626,6 +782,8 @@
             const [isEditItemModalOpen, setIsEditItemModalOpen] = React.useState(false); 
             const [editingItem, setEditingItem] = React.useState(null); 
             const [editingDemand, setEditingDemand] = React.useState(null);
+            const [isManageItemsModalOpen, setIsManageItemsModalOpen] = React.useState(false);
+            const [demandToManage, setDemandToManage] = React.useState(null);
             
             const [customers, setCustomers] = React.useState([]);
             const [products, setProducts] = React.useState([]);
@@ -635,6 +793,7 @@
             const [searchTerm, setSearchTerm] = React.useState('');
             const [statusFilter, setStatusFilter] = React.useState('all'); 
             const [emergencyFilter, setEmergencyFilter] = React.useState(false); 
+            const [awaitingCustomerFilter, setAwaitingCustomerFilter] = React.useState(false);
 
             const fetchAllProducts = async () => {
                 let allProducts = [];
@@ -681,8 +840,21 @@
                     const demandsWithCalculatedStatus = demandData.map(d => {
                         let status = 'open';
                         if (d.demand_item.length > 0) {
-                            if (d.demand_item.every(item => item.demandstatustype?.main_status === 'Fulfilled')) status = 'fulfilled';
-                            else if (d.demand_item.every(item => item.demandstatustype?.main_status === 'Cancelled')) status = 'cancelled';
+                            const allItemsAreClosed = d.demand_item.every(
+                                item => item.demandstatustype?.main_status === 'Fulfilled' || item.demandstatustype?.main_status === 'Cancelled'
+                            );
+
+                            if (allItemsAreClosed) {
+                                const hasAtLeastOneFulfilled = d.demand_item.some(
+                                    item => item.demandstatustype?.main_status === 'Fulfilled'
+                                );
+
+                                if (hasAtLeastOneFulfilled) {
+                                    status = 'fulfilled';
+                                } else {
+                                    status = 'cancelled';
+                                }
+                            }
                         }
                         return { ...d, status };
                     });
@@ -733,8 +905,12 @@
                         return customerMatch || productMatch || idMatch;
                     })
                     .filter(demand => statusFilter === 'all' || demand.status === statusFilter)
-                    .filter(demand => !emergencyFilter || demand.is_emergency === true);
-            }, [demands, searchTerm, statusFilter, emergencyFilter]);
+                    .filter(demand => !emergencyFilter || demand.is_emergency === true)
+                    .filter(demand => 
+                        !awaitingCustomerFilter || 
+                        demand.demand_item.some(item => item.demandstatustype?.title_farsi === "کالا تامین شد و منتظر تصمیم مشتری هست")
+                    );
+            }, [demands, searchTerm, statusFilter, emergencyFilter, awaitingCustomerFilter]);
 
             const handleDeleteDemand = (demandId) => {
                 setConfirmState({
@@ -762,9 +938,14 @@
             const handleOpenModal = () => setIsModalOpen(true);
             const handleCloseModal = () => setIsModalOpen(false);
             const handleSaveDemand = () => { fetchData(); handleCloseModal(); };
+            
             const handleOpenEditItemModal = (item, demand) => { setEditingItem(item); setEditingDemand(demand); setIsEditItemModalOpen(true); };
             const handleCloseEditItemModal = () => { setEditingItem(null); setEditingDemand(null); setIsEditItemModalOpen(false); };
             const handleSaveItem = () => { fetchData(); handleCloseEditItemModal(); };
+
+            const handleOpenManageItemsModal = (demand) => { setDemandToManage(demand); setIsManageItemsModalOpen(true); };
+            const handleCloseManageItemsModal = () => { setDemandToManage(null); setIsManageItemsModalOpen(false); };
+            const handleSaveManagedItems = () => { fetchData(); handleCloseManageItemsModal(); };
             
             const groupedStatuses = React.useMemo(() => {
                 return demandStatuses.reduce((acc, status) => {
@@ -802,9 +983,15 @@
                                     <option value="all">همه</option><option value="open">باز</option><option value="fulfilled">تکمیل شده</option><option value="cancelled">لغو شده</option>
                                 </select>
                             </div>
-                            <div className="flex items-center justify-self-start pt-6">
-                                <input type="checkbox" id="emergencyFilter" checked={emergencyFilter} onChange={e => setEmergencyFilter(e.target.checked)} className="ml-2 h-4 w-4 rounded text-indigo-600 focus:ring-indigo-500" />
-                                <label htmlFor="emergencyFilter" className="text-sm font-medium">فقط فوری‌ها</label>
+                            <div className="flex items-center justify-self-start pb-2 gap-x-6">
+                               <div className="flex items-center">
+                                    <input type="checkbox" id="emergencyFilter" checked={emergencyFilter} onChange={e => setEmergencyFilter(e.target.checked)} className="ml-2 h-4 w-4 rounded text-indigo-600 focus:ring-indigo-500" />
+                                    <label htmlFor="emergencyFilter" className="text-sm font-medium">فقط فوری‌ها</label>
+                                </div>
+                                <div className="flex items-center">
+                                    <input type="checkbox" id="awaitingCustomerFilter" checked={awaitingCustomerFilter} onChange={e => setAwaitingCustomerFilter(e.target.checked)} className="ml-2 h-4 w-4 rounded text-indigo-600 focus:ring-indigo-500" />
+                                    <label htmlFor="awaitingCustomerFilter" className="text-sm font-medium whitespace-nowrap">کالا تامین شد</label>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -830,6 +1017,12 @@
                                         <span className={`px-2 py-1 text-xs rounded-full font-semibold ${demand.status === 'fulfilled' ? 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200' : demand.status === 'cancelled' ? 'bg-gray-200 text-gray-800 dark:bg-gray-600 dark:text-gray-200' : 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'}`}>
                                             {demand.status === 'fulfilled' ? 'تکمیل شده' : demand.status === 'cancelled' ? 'لغو شده' : 'باز'}
                                         </span>
+                                        <button onClick={() => handleOpenManageItemsModal(demand)} className="text-gray-400 hover:text-indigo-500 dark:hover:text-indigo-400 p-1 rounded-full transition-colors" title="مدیریت اقلام">
+                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                                                <path d="M17.414 2.586a2 2 0 00-2.828 0L7 10.172V13h2.828l7.586-7.586a2 2 0 000-2.828z" />
+                                                <path fillRule="evenodd" d="M2 6a2 2 0 012-2h4a1 1 0 010 2H4v10h10v-4a1 1 0 112 0v4a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" clipRule="evenodd" />
+                                            </svg>
+                                        </button>
                                         <button onClick={() => handleDeleteDemand(demand.id)} className="text-gray-400 hover:text-red-500 dark:hover:text-red-400 p-1 rounded-full transition-colors" title="حذف تقاضا">
                                              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm4 0a1 1 0 012 0v6a1 1 0 11-2 0V8z" clipRule="evenodd" /></svg>
                                         </button>
@@ -886,6 +1079,7 @@
 
                     {isModalOpen && <DemandFormModal isOpen={isModalOpen} onClose={handleCloseModal} onSave={handleSaveDemand} customers={customers} products={products} />}
                     {isEditItemModalOpen && <EditDemandItemModal isOpen={isEditItemModalOpen} onClose={handleCloseEditItemModal} onSave={handleSaveItem} itemToEdit={editingItem} demand={editingDemand} demandStatuses={demandStatuses} groupedStatuses={groupedStatuses} />}
+                    {isManageItemsModalOpen && <ManageDemandItemsModal isOpen={isManageItemsModalOpen} onClose={handleCloseManageItemsModal} onSave={handleSaveManagedItems} demandToEdit={demandToManage} products={products} />}
                     <ConfirmModal isOpen={confirmState.isOpen} onClose={() => setConfirmState({ isOpen: false, onConfirm: null, message: '', title: '' })} onConfirm={confirmState.onConfirm} title={confirmState.title} message={confirmState.message} />
                 </div>
             );
