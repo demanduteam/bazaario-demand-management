@@ -54,7 +54,7 @@
             max-height: 90vh;
             overflow-y: auto;
         }
-         .spinner {
+        .spinner {
             border: 4px solid rgba(0, 0, 0, 0.1);
             border-left-color: #4f46e5; /* indigo-600 */
             border-radius: 50%;
@@ -78,6 +78,7 @@
         // ==================================================
         const { createClient } = supabase;
 
+        // Note: The Supabase variables __supabase_url and __supabase_anon_key are expected to be available globally in the execution environment.
         const supabaseUrl = typeof __supabase_url !== 'undefined' ? __supabase_url : 'https://wehyjatotbzxargnxasg.supabase.co';
         const supabaseKey = typeof __supabase_anon_key !== 'undefined' ? __supabase_anon_key : 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndlaHlqYXRvdGJ6eGFyZ254YXNnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTE5MTIwMjEsImV4cCI6MjA2NzQ4ODAyMX0.2R448DuEBlTrNvaYXiYZ8D5M7MJNv7n1qmIDHQBNFiY';
 
@@ -104,6 +105,7 @@
                 const date = new Date(dateString);
                 if (isNaN(date)) return '-';
                 if (!window.jalaali || !window.jalaali.toJalaali) { 
+                    // Fallback to standard date if jalaali-js is unavailable
                     return date.toLocaleString('en-CA');
                 }
                 const jDate = window.jalaali.toJalaali(date);
@@ -193,7 +195,7 @@
                         onChange={e => setSearchTerm(e.target.value)}
                         onFocus={() => setIsOpen(true)}
                         disabled={disabled}
-                        className="w-full bg-gray-100 dark:bg-gray-700 p-2 rounded-lg"
+                        className="w-full bg-gray-100 dark:bg-gray-700 p-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
                     />
                     {isOpen && !disabled && (
                         <div className="absolute z-10 w-full mt-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg shadow-lg max-h-60 overflow-y-auto">
@@ -246,8 +248,8 @@
                         console.error("Error fetching customer locations:", error);
                         setError("خطا در دریافت آدرس‌های مشتری.");
                     } else {
-                        setCustomerLocations(data.map(ul => ul.location));
-                        if (data.length === 1) {
+                        setCustomerLocations(data.map(ul => ul.location).filter(loc => loc)); // Filter out potential null locations
+                        if (data.length === 1 && data[0].location) {
                             setLocationId(data[0].location.id);
                         } else {
                             setLocationId('');
@@ -269,6 +271,7 @@
                 setItems(newItems);
 
                 if (field === 'productid' && value) {
+                    // Fetch supplier prices for the selected product
                     const { data, error } = await supabaseClient
                         .from('supplierstock')
                         .select('unitprice, profiles:supplieruserid (fullname)')
@@ -289,7 +292,7 @@
             const handleSubmit = async (e) => {
                 e.preventDefault();
                 if (!customerId || items.length === 0 || items.some(i => !i.productid || !i.quantity)) {
-                    setError('لطفا مشتری را انتخاب کرده و حداقل یک کالا اضافه کنید.');
+                    setError('لطفا مشتری را انتخاب کرده و حداقل یک کالا با تعداد مشخص اضافه کنید.');
                     return;
                 }
                 if (customerLocations.length > 0 && !locationId) {
@@ -319,7 +322,7 @@
                     const demandItems = items.map(item => ({
                         demandid: demandData.id,
                         productid: item.productid,
-                        quantity: item.quantity,
+                        quantity: Number(item.quantity),
                         demand_admin_note: item.demand_admin_note,
                         supply_admin_note: item.supply_admin_note,
                         demandstatusid: 12 // Default status: 'در انتظار تامین'
@@ -376,24 +379,24 @@
                     <form onSubmit={handleSubmit} className="space-y-6">
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
                             <div>
-                                <label className="block text-sm font-medium mb-1">مشتری</label>
+                                <label className="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">مشتری</label>
                                 <SearchableSelect options={customerOptions} value={customerId} onChange={setCustomerId} placeholder="جستجوی نام یا شماره مشتری..." />
                             </div>
                             <div>
-                                <label className="block text-sm font-medium mb-1">مهلت تحویل (اختیاری)</label>
+                                <label className="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">مهلت تحویل (اختیاری)</label>
                                 <input type="date" value={deadline} onChange={e => setDeadline(e.target.value)} className="w-full bg-gray-100 dark:bg-gray-700 p-2 rounded-lg" />
                             </div>
                         </div>
                         
                         <div className="flex items-center">
-                            <input type="checkbox" id="is_emergency" checked={isEmergency} onChange={(e) => setIsEmergency(e.target.checked)} className="ml-2 h-4 w-4 rounded" />
+                            <input type="checkbox" id="is_emergency" checked={isEmergency} onChange={(e) => setIsEmergency(e.target.checked)} className="ml-2 h-4 w-4 rounded text-red-600 border-red-300 focus:ring-red-500" />
                             <label htmlFor="is_emergency" className="text-sm font-medium">تقاضای فوری</label>
                         </div>
 
                         {isFetchingLocations && <p className="text-sm text-gray-500">در حال بارگذاری آدرس‌ها...</p>}
                         {customerId && !isFetchingLocations && customerLocations.length > 0 && (
                              <div>
-                                <label className="block text-sm font-medium mb-1">آدرس تحویل</label>
+                                <label className="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">آدرس تحویل</label>
                                 <select value={locationId} onChange={e => setLocationId(e.target.value)} className="w-full bg-gray-100 dark:bg-gray-700 p-2 rounded-lg" required>
                                     <option value="" disabled>یک آدرس را انتخاب کنید...</option>
                                     {customerLocations.map(loc => {
@@ -422,50 +425,50 @@
                                             .map(prop => ({ title: prop.propertykey.title, value: prop.value }));
                                     }
                                     return (
-                                    <div key={item.key} className="p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
-                                        <div className="grid grid-cols-1 md:grid-cols-5 items-end gap-x-4 gap-y-2">
-                                            <div className="md:col-span-3">
-                                                <label className="text-xs text-gray-500 dark:text-gray-400">محصول</label>
-                                                <SearchableSelect options={productOptions} value={item.productid} onChange={(id) => handleItemChange(index, 'productid', id)} placeholder="جستجوی محصول با نام یا کد..." />
-                                            </div>
-                                            <div className="md:col-span-1">
-                                                <label className="text-xs text-gray-500 dark:text-gray-400">تعداد</label>
-                                                <input type="number" value={item.quantity} onChange={(e) => handleItemChange(index, 'quantity', e.target.value)} className="w-full bg-white dark:bg-gray-600 p-2 rounded-lg" placeholder="تعداد" min="1" />
-                                            </div>
-                                            <div className="flex justify-end"><button type="button" onClick={() => handleRemoveItem(index)} className="text-red-500 hover:text-red-700 p-2">✕</button></div>
-                                        </div>
-                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-2">
-                                            <textarea value={item.demand_admin_note} onChange={(e) => handleItemChange(index, 'demand_admin_note', e.target.value)} placeholder="یادداشت مدیر تقاضا..." className="w-full text-sm bg-white dark:bg-gray-600 p-2 rounded-lg" rows="2"></textarea>
-                                            <textarea value={item.supply_admin_note} onChange={(e) => handleItemChange(index, 'supply_admin_note', e.target.value)} placeholder="یادداشت مدیر تامین..." className="w-full text-sm bg-white dark:bg-gray-600 p-2 rounded-lg" rows="2"></textarea>
-                                        </div>
-                                        {prices.length > 0 && (
-                                            <div className="mt-2 pt-2 border-t border-gray-200 dark:border-gray-600">
-                                                <h4 className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1">قیمت‌های تامین‌کنندگان:</h4>
-                                                <div className="flex flex-wrap gap-2">
-                                                    {prices.map((price, idx) => ( <div key={idx} className="bg-gray-200 dark:bg-gray-600 text-xs px-2 py-1 rounded-full"><span className="font-semibold">{price.profiles.fullname}:</span> {formatCurrency(price.unitprice)}</div> ))}
+                                        <div key={item.key} className="p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg border border-gray-100 dark:border-gray-700">
+                                            <div className="grid grid-cols-1 md:grid-cols-5 items-end gap-x-4 gap-y-2">
+                                                <div className="md:col-span-3">
+                                                    <label className="text-xs text-gray-500 dark:text-gray-400">محصول</label>
+                                                    <SearchableSelect options={productOptions} value={item.productid} onChange={(id) => handleItemChange(index, 'productid', id)} placeholder="جستجوی محصول با نام یا کد..." />
                                                 </div>
-                                            </div>
-                                        )}
-                                        {productProperties.length > 0 && (
-                                            <div className="mt-2 pt-2 border-t border-gray-200 dark:border-gray-600">
-                                                <h4 className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1">ویژگی‌های محصول:</h4>
-                                                <div className="flex flex-wrap gap-2">
-                                                    {productProperties.map(prop => ( <div key={prop.title} className="bg-gray-200 dark:bg-gray-600 text-xs px-2 py-1 rounded-full"><span className="font-semibold">{prop.title}:</span> {prop.value}</div> ))}
+                                                <div className="md:col-span-1">
+                                                    <label className="text-xs text-gray-500 dark:text-gray-400">تعداد</label>
+                                                    <input type="number" value={item.quantity} onChange={(e) => handleItemChange(index, 'quantity', e.target.value)} className="w-full bg-white dark:bg-gray-600 p-2 rounded-lg" placeholder="تعداد" min="1" required />
                                                 </div>
+                                                <div className="flex justify-end"><button type="button" onClick={() => handleRemoveItem(index)} className="text-red-500 hover:text-red-700 p-2">✕</button></div>
                                             </div>
-                                        )}
-                                    </div>
-                                    )
-                                })}
+                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-2">
+                                                <textarea value={item.demand_admin_note} onChange={(e) => handleItemChange(index, 'demand_admin_note', e.target.value)} placeholder="یادداشت مدیر تقاضا..." className="w-full text-sm bg-white dark:bg-gray-600 p-2 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500" rows="2"></textarea>
+                                                <textarea value={item.supply_admin_note} onChange={(e) => handleItemChange(index, 'supply_admin_note', e.target.value)} placeholder="یادداشت مدیر تامین..." className="w-full text-sm bg-white dark:bg-gray-600 p-2 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500" rows="2"></textarea>
+                                            </div>
+                                            {prices.length > 0 && (
+                                                <div className="mt-2 pt-2 border-t border-gray-200 dark:border-gray-600">
+                                                    <h4 className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1">قیمت‌های تامین‌کنندگان:</h4>
+                                                    <div className="flex flex-wrap gap-2">
+                                                        {prices.map((price, idx) => ( <div key={idx} className="bg-gray-200 dark:bg-gray-600 text-xs px-2 py-1 rounded-full"><span className="font-semibold">{price.profiles.fullname}:</span> {formatCurrency(price.unitprice)}</div> ))}
+                                                    </div>
+                                                </div>
+                                            )}
+                                            {productProperties.length > 0 && (
+                                                <div className="mt-2 pt-2 border-t border-gray-200 dark:border-gray-600">
+                                                    <h4 className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1">ویژگی‌های محصول:</h4>
+                                                    <div className="flex flex-wrap gap-2">
+                                                        {productProperties.map(prop => ( <div key={prop.title} className="bg-gray-200 dark:bg-gray-600 text-xs px-2 py-1 rounded-full"><span className="font-semibold">{prop.title}:</span> {prop.value}</div> ))}
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+                                        )
+                                    })}
                             </div>
-                            <button type="button" onClick={handleAddItem} className="mt-4 w-full text-center py-2 px-4 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition">+ افزودن کالا</button>
+                            <button type="button" onClick={handleAddItem} className="mt-4 w-full text-center py-2 px-4 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition font-semibold">+ افزودن کالا</button>
                         </div>
                         
                         {error && <p className="text-red-500 text-sm">{error}</p>}
 
                         <div className="flex justify-end gap-4 pt-4 border-t border-gray-200 dark:border-gray-700">
-                            <button type="button" onClick={onClose} className="bg-gray-200 dark:bg-gray-600 py-2 px-5 rounded-lg font-semibold">بازگشت</button>
-                            <button type="submit" disabled={isLoading} className="bg-indigo-600 text-white py-2 px-5 rounded-lg font-semibold disabled:bg-indigo-400">{isLoading ? 'در حال ثبت...' : 'ثبت تقاضا'}</button>
+                            <button type="button" onClick={onClose} className="bg-gray-200 dark:bg-gray-600 py-2 px-5 rounded-lg font-semibold hover:bg-gray-300 dark:hover:bg-gray-700 transition">بازگشت</button>
+                            <button type="submit" disabled={isLoading} className="bg-indigo-600 text-white py-2 px-5 rounded-lg font-semibold hover:bg-indigo-700 transition disabled:bg-indigo-400">{isLoading ? 'در حال ثبت...' : 'ثبت تقاضا'}</button>
                         </div>
                     </form>
                 </Modal>
@@ -498,10 +501,17 @@
                     });
                     setStatusId(itemToEdit.demandstatusid || '');
                     setCancellationReason('');
+                    if (itemToEdit.demand_admin_note?.startsWith('(دلیل لغو:')) {
+                        const match = itemToEdit.demand_admin_note.match(/\(دلیل لغو: (.*?)\)/);
+                        if (match && match[1]) {
+                             setCancellationReason(match[1]);
+                             setFormData(prev => ({...prev, demand_admin_note: itemToEdit.demand_admin_note.replace(match[0], '').trim() }));
+                        }
+                    }
                 }
             }, [itemToEdit]);
             
-            if (!itemToEdit) return null;
+            if (!itemToEdit || !demand) return null;
 
             const handleChange = (e) => {
                 const { name, value } = e.target;
@@ -510,8 +520,8 @@
 
             const handleSubmit = async (e) => {
                 e.preventDefault();
-                if (!formData.quantity || formData.quantity <= 0) {
-                    setError('تعداد باید یک عدد مثبت باشد.');
+                if (!formData.quantity || Number(formData.quantity) <= 0) {
+                    setError('تعداد درخواستی باید یک عدد مثبت باشد.');
                     return;
                 }
                 if (isCancelled && !cancellationReason) {
@@ -520,31 +530,36 @@
                 }
                 setIsLoading(true);
                 setError('');
+                
                 try {
                     let final_demand_note = formData.demand_admin_note;
                     if (isCancelled) {
-                        final_demand_note = `(دلیل لغو: ${cancellationReason}) ${formData.demand_admin_note}`;
+                        final_demand_note = `(دلیل لغو: ${cancellationReason}) ${formData.demand_admin_note}`.trim();
                     }
+
+                    const approved_supply_price = formData.approved_supply_price === '' ? null : Number(formData.approved_supply_price);
+                    const approved_supply_quantity = formData.approved_supply_quantity === '' ? null : Number(formData.approved_supply_quantity);
+
                     const updatedFields = {
                         quantity: Number(formData.quantity),
                         demand_admin_note: final_demand_note,
                         supply_admin_note: formData.supply_admin_note,
-                        approved_supply_price: formData.approved_supply_price === '' ? null : Number(formData.approved_supply_price),
-                        approved_supply_quantity: formData.approved_supply_quantity === '' ? null : Number(formData.approved_supply_quantity),
+                        approved_supply_price: approved_supply_price,
+                        approved_supply_quantity: approved_supply_quantity,
                         demandstatusid: statusId
                     };
+                    
                     const { error: updateError } = await supabaseClient.from('demand_item').update(updatedFields).eq('id', itemToEdit.id);
                     if (updateError) throw updateError;
                     
-                    const changes = [];
                     if (itemToEdit.demandstatusid !== statusId) {
+                         // Insert status log only if the status actually changed
                          const newStatus = demandStatuses.find(s => s.id === statusId);
                          await supabaseClient.from('demandstatuslog').insert({ demand_item_id: itemToEdit.id, demandstatusid: statusId });
-                         changes.push(`وضعیت به ${newStatus?.title_farsi} تغییر کرد.`);
+                         // Optionally log the change for audit/history (if the table demand_item_log exists and is used for audit)
+                         await supabaseClient.from('demand_item_log').insert({ demand_item_id: itemToEdit.id, change_description: `وضعیت به ${newStatus?.title_farsi} تغییر کرد.` });
                     }
-                    if (changes.length > 0) {
-                        await supabaseClient.from('demand_item_log').insert({ demand_item_id: itemToEdit.id, change_description: changes.join(' | ') });
-                    }
+                    
                     onSave();
                 } catch(err) {
                     console.error("Error updating item:", err);
@@ -556,7 +571,7 @@
 
             return (
                 <Modal isOpen={isOpen} onClose={onClose} title={`ویرایش آیتم: ${itemToEdit.product.title}`}>
-                    <div className="p-4 mb-4 bg-indigo-100 dark:bg-indigo-900/50 rounded-lg grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
+                    <div className="p-4 mb-4 bg-indigo-100 dark:bg-indigo-900/50 rounded-lg grid grid-cols-2 md:grid-cols-3 gap-4 text-sm text-gray-800 dark:text-gray-200">
                         <div><span className="font-semibold text-gray-600 dark:text-gray-400">مشتری:</span> {demand.profiles.fullname}</div>
                         <div><span className="font-semibold text-gray-600 dark:text-gray-400">شهر:</span> {demand.location?.city?.title || '-'}</div>
                         <div><span className="font-semibold text-gray-600 dark:text-gray-400">برند:</span> {itemToEdit.product.brand?.title || '-'}</div>
@@ -564,7 +579,7 @@
                     <form onSubmit={handleSubmit} className="space-y-4">
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div>
-                                <label className="block text-sm font-medium text-gray-600 dark:text-gray-300 mb-1">وضعیت آیتم</label>
+                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">وضعیت آیتم</label>
                                 <select value={statusId} onChange={e => setStatusId(Number(e.target.value))} className="w-full bg-gray-100 dark:bg-gray-700 p-2 rounded-lg">
                                     {Object.entries(groupedStatuses).map(([mainStatus, statuses]) => (
                                         <optgroup key={mainStatus} label={mainStatus}>
@@ -575,7 +590,7 @@
                             </div>
                             {isCancelled && (
                                 <div>
-                                    <label className="block text-sm font-medium text-gray-600 dark:text-gray-300 mb-1">دلیل لغو</label>
+                                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">دلیل لغو</label>
                                     <select value={cancellationReason} onChange={e => setCancellationReason(e.target.value)} className="w-full bg-gray-100 dark:bg-gray-700 p-2 rounded-lg" required>
                                         <option value="" disabled>انتخاب دلیل...</option>
                                         {cancellationReasons.map(reason => <option key={reason} value={reason}>{reason}</option>)}
@@ -585,30 +600,30 @@
                         </div>
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                              <div>
-                                <label className="block text-sm font-medium text-gray-600 dark:text-gray-300 mb-1">تعداد درخواستی</label>
+                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">تعداد درخواستی</label>
                                 <input type="number" name="quantity" value={formData.quantity} onChange={handleChange} className="w-full bg-gray-100 dark:bg-gray-700 p-2 rounded-lg" min="1" required />
                             </div>
                             <div>
-                                <label className="block text-sm font-medium text-gray-600 dark:text-gray-300 mb-1">تعداد  تامین شده</label>
+                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">تعداد  تامین شده</label>
                                 <input type="number" name="approved_supply_quantity" value={formData.approved_supply_quantity} onChange={handleChange} className="w-full bg-gray-100 dark:bg-gray-700 p-2 rounded-lg" min="0" />
                             </div>
                             <div>
-                                <label className="block text-sm font-medium text-gray-600 dark:text-gray-300 mb-1">قیمت  تامین شده (تومان)</label>
+                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">قیمت  تامین شده (تومان)</label>
                                 <input type="number" name="approved_supply_price" value={formData.approved_supply_price} onChange={handleChange} className="w-full bg-gray-100 dark:bg-gray-700 p-2 rounded-lg" min="0" />
                             </div>
                         </div>
                         <div>
-                            <label className="block text-sm font-medium text-gray-600 dark:text-gray-300 mb-1">یادداشت مدیر تقاضا</label>
+                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">یادداشت مدیر تقاضا</label>
                             <textarea name="demand_admin_note" value={formData.demand_admin_note} onChange={handleChange} className="w-full bg-gray-100 dark:bg-gray-700 p-2 rounded-lg" rows="3"></textarea>
                         </div>
                         <div>
-                            <label className="block text-sm font-medium text-gray-600 dark:text-gray-300 mb-1">یادداشت مدیر تامین</label>
+                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">یادداشت مدیر تامین</label>
                             <textarea name="supply_admin_note" value={formData.supply_admin_note} onChange={handleChange} className="w-full bg-gray-100 dark:bg-gray-700 p-2 rounded-lg" rows="3"></textarea>
                         </div>
                         {error && <p className="text-red-500 text-sm">{error}</p>}
                         <div className="flex justify-end gap-3 pt-4 border-t border-gray-200 dark:border-gray-600">
-                             <button type="button" onClick={onClose} className="bg-gray-200 dark:bg-gray-600 py-2 px-5 rounded-lg font-semibold">انصراف</button>
-                             <button type="submit" disabled={isLoading} className="bg-indigo-600 text-white py-2 px-5 rounded-lg font-semibold disabled:bg-indigo-400">{isLoading ? 'در حال ذخیره...' : 'ذخیره تغییرات'}</button>
+                             <button type="button" onClick={onClose} className="bg-gray-200 dark:bg-gray-600 py-2 px-5 rounded-lg font-semibold hover:bg-gray-300 dark:hover:bg-gray-700 transition">انصراف</button>
+                             <button type="submit" disabled={isLoading} className="bg-indigo-600 text-white py-2 px-5 rounded-lg font-semibold hover:bg-indigo-700 transition disabled:bg-indigo-400">{isLoading ? 'در حال ذخیره...' : 'ذخیره تغییرات'}</button>
                         </div>
                     </form>
                 </Modal>
@@ -688,9 +703,9 @@
 
                         const logsToInsert = insertedItems.map(item => ({ demand_item_id: item.id, demandstatusid: 12 }));
                          if (logsToInsert.length > 0) {
-                            const { error: logError } = await supabaseClient.from('demandstatuslog').insert(logsToInsert);
-                            if (logError) console.error("Error logging status for new items:", logError);
-                        }
+                             const { error: logError } = await supabaseClient.from('demandstatuslog').insert(logsToInsert);
+                             if (logError) console.error("Error logging status for new items:", logError);
+                         }
                     }
                     
                     // 3. Update existing items
@@ -731,14 +746,14 @@
                 <Modal isOpen={isOpen} onClose={onClose} title={`مدیریت اقلام تقاضای ${demandToEdit.profiles.fullname}`}>
                     <form onSubmit={handleSubmit} className="space-y-6">
                         <div className="p-3 bg-gray-100 dark:bg-gray-900 rounded-lg text-sm">
-                            <p><span className="font-semibold">شناسه تقاضا:</span> {demandToEdit.id}</p>
-                            <p><span className="font-semibold">تاریخ ثبت:</span> {formatDateTime(demandToEdit.createdat)}</p>
+                            <p><span className="font-semibold text-gray-700 dark:text-gray-300">شناسه تقاضا:</span> {demandToEdit.id}</p>
+                            <p><span className="font-semibold text-gray-700 dark:text-gray-300">تاریخ ثبت:</span> {formatDateTime(demandToEdit.createdat)}</p>
                         </div>
                         <div className="border-t border-gray-200 dark:border-gray-700 pt-4">
                             <h3 className="text-lg font-semibold mb-2">اقلام درخواستی</h3>
                             <div className="space-y-3">
                                 {items.map((item, index) => (
-                                    <div key={item.key} className="p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
+                                    <div key={item.key} className="p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg border border-gray-100 dark:border-gray-700">
                                         <div className="grid grid-cols-1 md:grid-cols-5 items-end gap-x-4 gap-y-2">
                                             <div className="md:col-span-3">
                                                 <label className="text-xs text-gray-500 dark:text-gray-400">محصول</label>
@@ -746,7 +761,7 @@
                                             </div>
                                             <div className="md:col-span-1">
                                                 <label className="text-xs text-gray-500 dark:text-gray-400">تعداد</label>
-                                                <input type="number" value={item.quantity} onChange={(e) => handleItemChange(index, 'quantity', e.target.value)} className="w-full bg-white dark:bg-gray-600 p-2 rounded-lg" placeholder="تعداد" min="1" />
+                                                <input type="number" value={item.quantity} onChange={(e) => handleItemChange(index, 'quantity', e.target.value)} className="w-full bg-white dark:bg-gray-600 p-2 rounded-lg" placeholder="تعداد" min="1" required />
                                             </div>
                                             <div className="flex justify-end"><button type="button" onClick={() => handleRemoveItem(index)} className="text-red-500 hover:text-red-700 p-2">✕</button></div>
                                         </div>
@@ -757,14 +772,14 @@
                                     </div>
                                 ))}
                             </div>
-                            <button type="button" onClick={handleAddItem} className="mt-4 w-full text-center py-2 px-4 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition">+ افزودن کالا</button>
+                            <button type="button" onClick={handleAddItem} className="mt-4 w-full text-center py-2 px-4 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition font-semibold">+ افزودن کالا</button>
                         </div>
                         
                         {error && <p className="text-red-500 text-sm">{error}</p>}
 
                         <div className="flex justify-end gap-4 pt-4 border-t border-gray-200 dark:border-gray-700">
-                            <button type="button" onClick={onClose} className="bg-gray-200 dark:bg-gray-600 py-2 px-5 rounded-lg font-semibold">بازگشت</button>
-                            <button type="submit" disabled={isLoading} className="bg-indigo-600 text-white py-2 px-5 rounded-lg font-semibold disabled:bg-indigo-400">{isLoading ? 'در حال ذخیره...' : 'ذخیره تغییرات'}</button>
+                            <button type="button" onClick={onClose} className="bg-gray-200 dark:bg-gray-600 py-2 px-5 rounded-lg font-semibold hover:bg-gray-300 dark:hover:bg-gray-700 transition">بازگشت</button>
+                            <button type="submit" disabled={isLoading} className="bg-indigo-600 text-white py-2 px-5 rounded-lg font-semibold hover:bg-indigo-700 transition disabled:bg-indigo-400">{isLoading ? 'در حال ذخیره...' : 'ذخیره تغییرات'}</button>
                         </div>
                     </form>
                 </Modal>
@@ -774,7 +789,7 @@
         // ==================================================
         // The Standalone Component
         // ==================================================
-        const DemandManagement = () => {
+        const DemandManagement = ({ theme, toggleTheme }) => {
             const [demands, setDemands] = React.useState([]);
             const [isLoading, setIsLoading] = React.useState(true);
             const [error, setError] = React.useState('');
@@ -791,7 +806,7 @@
             const [confirmState, setConfirmState] = React.useState({ isOpen: false, onConfirm: null, message: '', title: '' });
 
             const [searchTerm, setSearchTerm] = React.useState('');
-            const [statusFilter, setStatusFilter] = React.useState('all'); 
+            const [statusFilter, setStatusFilter] = React.useState('open'); // Changed default from 'all' to 'open'
             const [emergencyFilter, setEmergencyFilter] = React.useState(false); 
             const [awaitingCustomerFilter, setAwaitingCustomerFilter] = React.useState(false);
 
@@ -832,7 +847,7 @@
                             id, createdat, deadlinedate, is_emergency,
                             profiles (id, fullname),
                             location (*, city(*, province(*))),
-                            demand_item ( *, product ( *, brand(*), productproperty(*, propertykey(*)) ), demandstatustype(*) )
+                            demand_item ( id, quantity, approved_supply_price, approved_supply_quantity, demand_admin_note, supply_admin_note, demandstatusid, product ( id, title, brand(*), productproperty(*, propertykey(*)) ), demandstatustype(*) )
                         `)
                         .order('createdat', { ascending: false });
                     if (demandError) throw demandError;
@@ -887,7 +902,7 @@
                     .filter(demand => {
                         if (!searchTerm) return true;
                         const searchTermLower = searchTerm.toLowerCase();
-                        const customerMatch = demand.profiles?.fullname?.toLowerCase().includes(searchTermLower);
+                        const customerMatch = demand.profiles?.fullname?.toLowerCase().includes(searchTermLower) || demand.profiles?.mobile?.includes(searchTermLower);
 
                         const productMatch = demand.demand_item.some(item => {
                             if (!item.product) return false;
@@ -923,6 +938,7 @@
                             const itemIds = demands.find(d => d.id === demandId)?.demand_item.map(i => i.id) || [];
                             if(itemIds.length > 0) {
                                 await supabaseClient.from('demandstatuslog').delete().in('demand_item_id', itemIds);
+                                // Optional: Delete demand_item_log entries as well if used
                             }
                             await supabaseClient.from('demand_item').delete().eq('demandid', demandId);
                             await supabaseClient.from('demand').delete().eq('id', demandId);
@@ -948,6 +964,7 @@
             const handleSaveManagedItems = () => { fetchData(); handleCloseManageItemsModal(); };
             
             const groupedStatuses = React.useMemo(() => {
+                // Group statuses by their main_status (e.g., Open, Fulfilled, Cancelled)
                 return demandStatuses.reduce((acc, status) => {
                     const main = status.main_status;
                     if (!acc[main]) acc[main] = [];
@@ -960,10 +977,21 @@
                 <div className="p-4 sm:p-6 lg:p-8">
                     <header className="flex flex-col sm:flex-row justify-between items-center mb-6 gap-4">
                         <h1 className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white">مدیریت تقاضاها</h1>
-                        <button onClick={handleOpenModal} className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-lg flex items-center gap-2">
-                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clipRule="evenodd" /></svg>
-                            <span>ثبت تقاضای جدید</span>
-                        </button>
+                        <div className="flex items-center gap-4">
+                            {/* Theme Toggle Button */}
+                            <button onClick={toggleTheme} className="p-2 rounded-full text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition" title="تغییر تم">
+                                {theme === 'light' ? (
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" /></svg>
+                                ) : (
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" /></svg>
+                                )}
+                            </button>
+                            {/* New Demand Button */}
+                            <button onClick={handleOpenModal} className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-lg flex items-center gap-2 transition shadow-md hover:shadow-lg">
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clipRule="evenodd" /></svg>
+                                <span>ثبت تقاضای جدید</span>
+                            </button>
+                        </div>
                     </header>
                     
                     <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow mb-6">
@@ -983,14 +1011,14 @@
                                     <option value="all">همه</option><option value="open">باز</option><option value="fulfilled">تکمیل شده</option><option value="cancelled">لغو شده</option>
                                 </select>
                             </div>
-                            <div className="flex items-center justify-self-start pb-2 gap-x-6">
+                            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-self-start pb-2 gap-x-6 gap-y-2">
                                <div className="flex items-center">
-                                    <input type="checkbox" id="emergencyFilter" checked={emergencyFilter} onChange={e => setEmergencyFilter(e.target.checked)} className="ml-2 h-4 w-4 rounded text-indigo-600 focus:ring-indigo-500" />
+                                    <input type="checkbox" id="emergencyFilter" checked={emergencyFilter} onChange={e => setEmergencyFilter(e.target.checked)} className="ml-2 h-4 w-4 rounded text-indigo-600 border-gray-300 focus:ring-indigo-500" />
                                     <label htmlFor="emergencyFilter" className="text-sm font-medium">فقط فوری‌ها</label>
                                 </div>
                                 <div className="flex items-center">
-                                    <input type="checkbox" id="awaitingCustomerFilter" checked={awaitingCustomerFilter} onChange={e => setAwaitingCustomerFilter(e.target.checked)} className="ml-2 h-4 w-4 rounded text-indigo-600 focus:ring-indigo-500" />
-                                    <label htmlFor="awaitingCustomerFilter" className="text-sm font-medium whitespace-nowrap">کالا تامین شد</label>
+                                    <input type="checkbox" id="awaitingCustomerFilter" checked={awaitingCustomerFilter} onChange={e => setAwaitingCustomerFilter(e.target.checked)} className="ml-2 h-4 w-4 rounded text-indigo-600 border-gray-300 focus:ring-indigo-500" />
+                                    <label htmlFor="awaitingCustomerFilter" className="text-sm font-medium whitespace-nowrap">کالا تامین شد (منتظر مشتری)</label>
                                 </div>
                             </div>
                         </div>
@@ -1002,14 +1030,14 @@
                     {!isLoading && (
                         <div className="space-y-4">
                         {filteredDemands.map(demand => (
-                            <div key={demand.id} className="bg-white dark:bg-gray-800 rounded-lg shadow transition-all hover:shadow-lg">
+                            <div key={demand.id} className="bg-white dark:bg-gray-800 rounded-lg shadow transition-all hover:shadow-xl border border-gray-100 dark:border-gray-700">
                                 <header className="p-3 sm:p-4 border-b border-gray-200 dark:border-gray-700 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
                                     <div className="flex-1">
                                         <h2 className="font-bold text-lg text-indigo-700 dark:text-indigo-400">{demand.profiles.fullname}</h2>
                                         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-gray-500 dark:text-gray-400 mt-1">
                                             <span>شناسه: <span className="font-mono">{demand.id}</span></span>
                                             <span>تاریخ ثبت: <span className="font-semibold">{formatDateTime(demand.createdat)}</span></span>
-                                            <span>مهلت تحویل: <span className="font-semibold">{formatDateTime(demand.deadlinedate, false)}</span></span>
+                                            {demand.deadlinedate && <span>مهلت تحویل: <span className="font-semibold">{formatDateTime(demand.deadlinedate, false)}</span></span>}
                                         </div>
                                     </div>
                                     <div className="flex items-center gap-2 self-end sm:self-center">
@@ -1028,28 +1056,30 @@
                                         </button>
                                     </div>
                                 </header>
-                                <div className="overflow-x-auto">
-                                    <table className="w-full text-sm text-right">
+                                
+                                {/* Demand Items (Desktop Table View - md:block and up) */}
+                                <div className="overflow-x-auto hidden md:block">
+                                    <table className="min-w-full text-sm text-right divide-y divide-gray-200 dark:divide-gray-700">
                                         <thead className="bg-gray-50 dark:bg-gray-700/50 text-xs text-gray-600 dark:text-gray-300 uppercase">
                                             <tr>
-                                                <th className="p-3">محصول</th>
-                                                <th className="p-3">تعداد</th>
-                                                <th className="p-3">قیمت تامین</th>
-                                                <th className="p-3">تعداد تامین</th>
-                                                <th className="p-3">وضعیت آیتم</th>
-                                                <th className="p-3">عملیات</th>
+                                                <th className="p-3 text-right">محصول</th>
+                                                <th className="p-3 text-right">تعداد درخواستی</th>
+                                                <th className="p-3 text-right">قیمت تامین</th>
+                                                <th className="p-3 text-right">تعداد تامین</th>
+                                                <th className="p-3 text-right">وضعیت آیتم</th>
+                                                <th className="p-3 text-right">عملیات</th>
                                             </tr>
                                         </thead>
-                                        <tbody>
+                                        <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
                                         {demand.demand_item.map((item, itemIndex) => (
                                             <React.Fragment key={item.id}>
-                                                <tr className="border-b border-gray-200 dark:border-gray-700">
-                                                    <td className="p-3 font-semibold">{item.product ? `${item.product.brand ? item.product.brand.title + ' ' : ''}${item.product.title}`: 'محصول حذف شده'}</td>
+                                                <tr className="hover:bg-gray-50 dark:hover:bg-gray-700/20">
+                                                    <td className="p-3 font-semibold text-gray-800 dark:text-gray-100">{item.product ? `${item.product.brand ? item.product.brand.title + ' ' : ''}${item.product.title}`: 'محصول حذف شده'}</td>
                                                     <td className="p-3">{item.quantity}</td>
-                                                    <td className="p-3">{formatCurrency(item.approved_supply_price)}</td>
+                                                    <td className="p-3 font-mono">{formatCurrency(item.approved_supply_price)}</td>
                                                     <td className="p-3">{item.approved_supply_quantity || '-'}</td>
-                                                    <td className="p-3"><span className="px-2 py-1 text-xs rounded-full" style={{ backgroundColor: item.demandstatustype?.color_bg || '#E5E7EB', color: item.demandstatustype?.color_text || '#1F2937' }}>{item.demandstatustype?.title_farsi || 'ثبت شده'}</span></td>
-                                                    <td className="p-3"><button onClick={() => handleOpenEditItemModal(item, demand)} className="text-indigo-600 dark:text-indigo-400 hover:underline text-xs font-semibold">ویرایش</button></td>
+                                                    <td className="p-3"><span className="px-2 py-1 text-xs rounded-full whitespace-nowrap" style={{ backgroundColor: item.demandstatustype?.color_bg || '#E5E7EB', color: item.demandstatustype?.color_text || '#1F2937' }}>{item.demandstatustype?.title_farsi || 'ثبت شده'}</span></td>
+                                                    <td className="p-3"><button onClick={() => handleOpenEditItemModal(item, demand)} className="text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 hover:underline text-xs font-semibold">ویرایش</button></td>
                                                 </tr>
                                                 {(item.demand_admin_note || item.supply_admin_note) && (
                                                     <tr className="bg-gray-50 dark:bg-gray-900/20">
@@ -1063,6 +1093,51 @@
                                         ))}
                                         </tbody>
                                     </table>
+                                </div>
+                                
+                                {/* Demand Items (Mobile Card View - default/md:hidden) */}
+                                <div className="md:hidden p-3 space-y-3">
+                                    {demand.demand_item.map((item, itemIndex) => (
+                                        <div key={item.id} className="p-3 border border-gray-200 dark:border-gray-700 rounded-lg bg-gray-50 dark:bg-gray-700/50 space-y-2">
+                                            <div className="flex justify-between items-start border-b pb-2 mb-2 border-gray-200 dark:border-gray-600">
+                                                <div className="font-bold text-sm text-indigo-700 dark:text-indigo-400">
+                                                    {item.product ? `${item.product.brand ? item.product.brand.title + ' ' : ''}${item.product.title}`: 'محصول حذف شده'}
+                                                </div>
+                                                <button onClick={() => handleOpenEditItemModal(item, demand)} className="text-indigo-600 dark:text-indigo-400 hover:underline text-xs font-semibold px-2 py-1 rounded-md bg-indigo-100 dark:bg-indigo-900/50">
+                                                    ویرایش
+                                                </button>
+                                            </div>
+                                            
+                                            <div className="grid grid-cols-2 gap-3 text-xs">
+                                                <div className="flex justify-between">
+                                                    <span className="text-gray-500 dark:text-gray-400">تعداد درخواستی:</span>
+                                                    <span className="font-semibold text-gray-800 dark:text-gray-200">{item.quantity}</span>
+                                                </div>
+                                                <div className="flex justify-between">
+                                                    <span className="text-gray-500 dark:text-gray-400">تعداد تامین:</span>
+                                                    <span className="font-semibold text-gray-800 dark:text-gray-200">{item.approved_supply_quantity || '-'}</span>
+                                                </div>
+                                                <div className="flex justify-between col-span-2">
+                                                    <span className="text-gray-500 dark:text-gray-400">قیمت تامین:</span>
+                                                    <span className="font-mono text-green-600 dark:text-green-400">{formatCurrency(item.approved_supply_price)}</span>
+                                                </div>
+                                            </div>
+
+                                            <div className="pt-2 border-t border-gray-200 dark:border-gray-600 mt-2">
+                                                <div className="text-right mb-2">
+                                                    <span className="px-2 py-1 text-xs rounded-full whitespace-nowrap font-medium" style={{ backgroundColor: item.demandstatustype?.color_bg || '#E5E7EB', color: item.demandstatustype?.color_text || '#1F2937' }}>
+                                                        {item.demandstatustype?.title_farsi || 'ثبت شده'}
+                                                    </span>
+                                                </div>
+                                                {(item.demand_admin_note || item.supply_admin_note) && (
+                                                    <div className="mt-2 text-xs text-gray-600 dark:text-gray-400 space-y-1">
+                                                        {item.demand_admin_note && <div><strong>مدیر تقاضا:</strong> {item.demand_admin_note}</div>}
+                                                        {item.supply_admin_note && <div><strong>مدیر تامین:</strong> {item.supply_admin_note}</div>}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>
+                                    ))}
                                 </div>
                             </div>
                         ))}
@@ -1088,9 +1163,15 @@
         const App = () => {
              const [theme, setTheme] = React.useState('light');
              React.useEffect(() => {
-                document.documentElement.className = theme;
-            }, [theme]);
-            return <DemandManagement />;
+                 // Sync theme state with the document's class for Tailwind
+                 document.documentElement.className = theme;
+             }, [theme]);
+
+             const toggleTheme = () => {
+                setTheme(prev => prev === 'light' ? 'dark' : 'light');
+             };
+
+             return <DemandManagement theme={theme} toggleTheme={toggleTheme} />;
         }
 
         const container = document.getElementById('root');
@@ -1099,4 +1180,3 @@
     </script>
 </body>
 </html>
-
