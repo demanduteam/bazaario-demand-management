@@ -14,6 +14,15 @@
                     fontFamily: {
                         vazir: ['Vazirmatn', 'sans-serif'],
                     },
+                     keyframes: {
+                        'toast-in': {
+                          'from': { transform: 'translateX(100%)', opacity: '0' },
+                          'to': { transform: 'translateX(0)', opacity: '1' },
+                        },
+                     },
+                     animation: {
+                        'toast-in': 'toast-in 0.5s ease-out forwards',
+                     }
                 },
             },
         }
@@ -218,7 +227,7 @@
             );
         };
 
-        const DemandFormModal = ({ isOpen, onClose, onSave, customers, products }) => {
+        const DemandFormModal = ({ isOpen, onClose, onSave, customers, products, defaultStatusId }) => {
             const [customerId, setCustomerId] = React.useState('');
             const [deadline, setDeadline] = React.useState('');
             const [isEmergency, setIsEmergency] = React.useState(false);
@@ -325,7 +334,7 @@
                         quantity: Number(item.quantity),
                         demand_admin_note: item.demand_admin_note,
                         supply_admin_note: item.supply_admin_note,
-                        demandstatusid: 12 // Default status: 'در انتظار تامین'
+                        demandstatusid: defaultStatusId 
                     }));
 
                     const { data: insertedItems, error: itemsError } = await supabaseClient
@@ -338,7 +347,7 @@
                     // Step 3: Log the initial status for each newly created item
                     const logsToInsert = insertedItems.map(item => ({
                         demand_item_id: item.id,
-                        demandstatusid: 12
+                        demandstatusid: defaultStatusId
                     }));
 
                     if (logsToInsert.length > 0) {
@@ -367,7 +376,7 @@
             
             const productOptions = products.map(p => {
                 const telegramCodeProp = p.productproperty?.find(
-                     prop => prop.propertykey?.title?.toLowerCase().includes('تلگرام')
+                    prop => prop.propertykey?.title?.toLowerCase().includes('تلگرام')
                 );
                 const telegramCode = telegramCodeProp ? telegramCodeProp.value : '';
                 const displayTitle = `${telegramCode ? `[${telegramCode}] ` : ''}${p.brand ? p.brand.title + ' ' : ''}${p.title}`;
@@ -481,6 +490,7 @@
             const [cancellationReason, setCancellationReason] = React.useState('');
             const [isLoading, setIsLoading] = React.useState(false);
             const [error, setError] = React.useState('');
+            const [isEmergency, setIsEmergency] = React.useState(false);
 
             const isCancelled = React.useMemo(() => {
                 if (!statusId) return false;
@@ -491,7 +501,7 @@
             const cancellationReasons = ["قیمت بالا", "عدم موجودی", "عدم پاسخگویی", "به تعویق افتاده", "خرید از رقبا", "درخواست تعداد پایین", "درخواست تنوع", "هزینه ارسال بالا", "عدم اعتماد", "فاکتور بی‌پاسخ", "خرید چکی"];
 
             React.useEffect(() => {
-                if (itemToEdit) {
+                if (itemToEdit && demand) {
                     setFormData({
                         quantity: itemToEdit.quantity || '',
                         demand_admin_note: itemToEdit.demand_admin_note || '',
@@ -500,6 +510,7 @@
                         approved_supply_quantity: itemToEdit.approved_supply_quantity || ''
                     });
                     setStatusId(itemToEdit.demandstatusid || '');
+                    setIsEmergency(demand.is_emergency || false);
                     setCancellationReason('');
                     if (itemToEdit.demand_admin_note?.startsWith('(دلیل لغو:')) {
                         const match = itemToEdit.demand_admin_note.match(/\(دلیل لغو: (.*?)\)/);
@@ -509,7 +520,7 @@
                         }
                     }
                 }
-            }, [itemToEdit]);
+            }, [itemToEdit, demand]);
             
             if (!itemToEdit || !demand) return null;
 
@@ -553,13 +564,19 @@
                     if (updateError) throw updateError;
                     
                     if (itemToEdit.demandstatusid !== statusId) {
-                         // Insert status log only if the status actually changed
                          const newStatus = demandStatuses.find(s => s.id === statusId);
                          await supabaseClient.from('demandstatuslog').insert({ demand_item_id: itemToEdit.id, demandstatusid: statusId });
-                         // Optionally log the change for audit/history (if the table demand_item_log exists and is used for audit)
                          await supabaseClient.from('demand_item_log').insert({ demand_item_id: itemToEdit.id, change_description: `وضعیت به ${newStatus?.title_farsi} تغییر کرد.` });
                     }
                     
+                    if (demand.is_emergency !== isEmergency) {
+                        const { error: demandUpdateError } = await supabaseClient
+                            .from('demand')
+                            .update({ is_emergency: isEmergency })
+                            .eq('id', demand.id);
+                        if (demandUpdateError) throw demandUpdateError;
+                    }
+
                     onSave();
                 } catch(err) {
                     console.error("Error updating item:", err);
@@ -577,6 +594,10 @@
                         <div><span className="font-semibold text-gray-600 dark:text-gray-400">برند:</span> {itemToEdit.product.brand?.title || '-'}</div>
                     </div>
                     <form onSubmit={handleSubmit} className="space-y-4">
+                        <div className="flex items-center">
+                            <input type="checkbox" id="is_emergency_edit_item" checked={isEmergency} onChange={(e) => setIsEmergency(e.target.checked)} className="ml-2 h-4 w-4 rounded text-red-600 border-red-300 focus:ring-red-500" />
+                            <label htmlFor="is_emergency_edit_item" className="text-sm font-medium">تقاضای فوری</label>
+                        </div>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div>
                                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">وضعیت آیتم</label>
@@ -630,11 +651,12 @@
             );
         };
 
-        const ManageDemandItemsModal = ({ isOpen, onClose, onSave, demandToEdit, products }) => {
+        const ManageDemandItemsModal = ({ isOpen, onClose, onSave, demandToEdit, products, defaultStatusId }) => {
             const [items, setItems] = React.useState([]);
             const [originalItemIds, setOriginalItemIds] = React.useState(new Set());
             const [error, setError] = React.useState('');
             const [isLoading, setIsLoading] = React.useState(false);
+            const [isEmergency, setIsEmergency] = React.useState(false);
 
             React.useEffect(() => {
                 if (demandToEdit) {
@@ -645,6 +667,7 @@
                     }));
                     setItems(initialItems);
                     setOriginalItemIds(new Set(initialItems.map(item => item.id)));
+                    setIsEmergency(demandToEdit.is_emergency || false);
                 }
             }, [demandToEdit]);
 
@@ -678,7 +701,6 @@
                     const finalItemIds = new Set(items.filter(i => i.id).map(i => i.id));
                     const itemIdsToDelete = [...originalItemIds].filter(id => !finalItemIds.has(id));
                     
-                    // 1. Delete items that were removed
                     if (itemIdsToDelete.length > 0) {
                         await supabaseClient.from('demandstatuslog').delete().in('demand_item_id', itemIdsToDelete);
                         const { error: deleteError } = await supabaseClient.from('demand_item').delete().in('id', itemIdsToDelete);
@@ -688,7 +710,6 @@
                     const itemsToAdd = items.filter(item => !item.id);
                     const itemsToUpdate = items.filter(item => item.id && originalItemIds.has(item.id));
 
-                    // 2. Add new items
                     if (itemsToAdd.length > 0) {
                         const newItemsData = itemsToAdd.map(item => ({
                             demandid: demandToEdit.id,
@@ -696,19 +717,18 @@
                             quantity: Number(item.quantity),
                             demand_admin_note: item.demand_admin_note,
                             supply_admin_note: item.supply_admin_note,
-                            demandstatusid: 12 // Default status: 'در انتظار تامین'
+                            demandstatusid: defaultStatusId
                         }));
                         const { data: insertedItems, error: addError } = await supabaseClient.from('demand_item').insert(newItemsData).select();
                         if (addError) throw addError;
 
-                        const logsToInsert = insertedItems.map(item => ({ demand_item_id: item.id, demandstatusid: 12 }));
+                        const logsToInsert = insertedItems.map(item => ({ demand_item_id: item.id, demandstatusid: defaultStatusId }));
                          if (logsToInsert.length > 0) {
                              const { error: logError } = await supabaseClient.from('demandstatuslog').insert(logsToInsert);
                              if (logError) console.error("Error logging status for new items:", logError);
                          }
                     }
                     
-                    // 3. Update existing items
                     if (itemsToUpdate.length > 0) {
                        const updatePromises = itemsToUpdate.map(item => 
                             supabaseClient.from('demand_item').update({
@@ -724,6 +744,14 @@
                         });
                     }
 
+                    if (demandToEdit.is_emergency !== isEmergency) {
+                        const { error: demandUpdateError } = await supabaseClient
+                            .from('demand')
+                            .update({ is_emergency: isEmergency })
+                            .eq('id', demandToEdit.id);
+                        if (demandUpdateError) throw demandUpdateError;
+                    }
+
                     onSave();
                 } catch(err) {
                     console.error("Error managing demand items:", err);
@@ -734,12 +762,12 @@
             };
 
              const productOptions = products.map(p => {
-                const telegramCodeProp = p.productproperty?.find(
+                 const telegramCodeProp = p.productproperty?.find(
                      prop => prop.propertykey?.title?.toLowerCase().includes('تلگرام')
-                );
-                const telegramCode = telegramCodeProp ? telegramCodeProp.value : '';
-                const displayTitle = `${telegramCode ? `[${telegramCode}] ` : ''}${p.brand ? p.brand.title + ' ' : ''}${p.title}`;
-                return { id: p.id, title: displayTitle };
+                 );
+                 const telegramCode = telegramCodeProp ? telegramCodeProp.value : '';
+                 const displayTitle = `${telegramCode ? `[${telegramCode}] ` : ''}${p.brand ? p.brand.title + ' ' : ''}${p.title}`;
+                 return { id: p.id, title: displayTitle };
             });
 
             return (
@@ -749,6 +777,12 @@
                             <p><span className="font-semibold text-gray-700 dark:text-gray-300">شناسه تقاضا:</span> {demandToEdit.id}</p>
                             <p><span className="font-semibold text-gray-700 dark:text-gray-300">تاریخ ثبت:</span> {formatDateTime(demandToEdit.createdat)}</p>
                         </div>
+
+                        <div className="flex items-center">
+                            <input type="checkbox" id="is_emergency_manage_items" checked={isEmergency} onChange={(e) => setIsEmergency(e.target.checked)} className="ml-2 h-4 w-4 rounded text-red-600 border-red-300 focus:ring-red-500" />
+                            <label htmlFor="is_emergency_manage_items" className="text-sm font-medium">تقاضای فوری</label>
+                        </div>
+                        
                         <div className="border-t border-gray-200 dark:border-gray-700 pt-4">
                             <h3 className="text-lg font-semibold mb-2">اقلام درخواستی</h3>
                             <div className="space-y-3">
@@ -787,7 +821,51 @@
         };
         
         // ==================================================
-        // The Standalone Component
+        // Toast Notification System
+        // ==================================================
+        const ToastContext = React.createContext();
+
+        const ToastProvider = ({ children }) => {
+            const [toasts, setToasts] = React.useState([]);
+            const idCounter = React.useRef(0);
+
+            const addToast = React.useCallback((message, type = 'success') => {
+                const id = idCounter.current++;
+                setToasts(prev => [...prev, { id, message, type }]);
+                setTimeout(() => {
+                    setToasts(prev => prev.filter(toast => toast.id !== id));
+                }, 4000);
+            }, []);
+
+            const ToastIcon = ({ type }) => {
+              if (type === 'success') {
+                return <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>;
+              }
+              if (type === 'error') {
+                 return <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>;
+              }
+              return null;
+            }
+
+            return (
+                <ToastContext.Provider value={{ addToast }}>
+                    {children}
+                    <div className="fixed bottom-5 left-5 z-[200] space-y-3">
+                        {toasts.map(toast => (
+                            <div key={toast.id} className={`flex items-center gap-3 p-4 rounded-lg shadow-lg text-white w-64 animate-toast-in ${toast.type === 'success' ? 'bg-green-500' : 'bg-red-500'}`}>
+                                <ToastIcon type={toast.type} />
+                                <span className="font-semibold">{toast.message}</span>
+                            </div>
+                        ))}
+                    </div>
+                </ToastContext.Provider>
+            );
+        };
+        const useToasts = () => React.useContext(ToastContext);
+
+
+        // ==================================================
+        // The Main Application Component
         // ==================================================
         const DemandManagement = ({ theme, toggleTheme }) => {
             const [demands, setDemands] = React.useState([]);
@@ -803,12 +881,15 @@
             const [customers, setCustomers] = React.useState([]);
             const [products, setProducts] = React.useState([]);
             const [demandStatuses, setDemandStatuses] = React.useState([]);
+            const [defaultStatusId, setDefaultStatusId] = React.useState(null);
             const [confirmState, setConfirmState] = React.useState({ isOpen: false, onConfirm: null, message: '', title: '' });
 
             const [searchTerm, setSearchTerm] = React.useState('');
             const [statusFilter, setStatusFilter] = React.useState('open'); // Changed default from 'all' to 'open'
             const [emergencyFilter, setEmergencyFilter] = React.useState(false); 
             const [awaitingCustomerFilter, setAwaitingCustomerFilter] = React.useState(false);
+            
+            const { addToast } = useToasts();
 
             const fetchAllProducts = async () => {
                 let allProducts = [];
@@ -845,7 +926,7 @@
                         .from('demand')
                         .select(`
                             id, createdat, deadlinedate, is_emergency,
-                            profiles (id, fullname),
+                            profiles (id, fullname, mobile),
                             location (*, city(*, province(*))),
                             demand_item ( id, quantity, approved_supply_price, approved_supply_quantity, demand_admin_note, supply_admin_note, demandstatusid, product ( id, title, brand(*), productproperty(*, propertykey(*)) ), demandstatustype(*) )
                         `)
@@ -871,7 +952,14 @@
                                 }
                             }
                         }
-                        return { ...d, status };
+
+                        const totalValue = d.demand_item.reduce((sum, item) => {
+                            const price = item.approved_supply_price || 0;
+                            const quantity = item.approved_supply_quantity || 0;
+                            return sum + (price * quantity);
+                        }, 0);
+
+                        return { ...d, status, totalValue };
                     });
                     setDemands(demandsWithCalculatedStatus || []);
 
@@ -886,10 +974,21 @@
                     setCustomers(customerRes.data || []);
                     setProducts(productsRes || []);
                     setDemandStatuses(statusesRes.data || []);
+                    
+                    // Set default status ID for new items
+                    const defaultStatus = statusesRes.data?.find(s => s.title_farsi === 'در انتظار تامین');
+                    if (defaultStatus) {
+                        setDefaultStatusId(defaultStatus.id);
+                    } else {
+                        console.warn("Default status 'در انتظار تامین' not found. Falling back to first available status.");
+                        setDefaultStatusId(statusesRes.data?.[0]?.id || null);
+                    }
+
                 } catch (err)
                 {
                     console.error("Error fetching demand data:", err);
                     setError(`خطا در بارگذاری اطلاعات: ${err.message}`);
+                    addToast('خطا در بارگذاری اطلاعات', 'error');
                 } finally {
                     setIsLoading(false);
                 }
@@ -943,9 +1042,11 @@
                             await supabaseClient.from('demand_item').delete().eq('demandid', demandId);
                             await supabaseClient.from('demand').delete().eq('id', demandId);
                             fetchData(); 
+                            addToast('تقاضا با موفقیت حذف شد.');
                         } catch (err) {
                             console.error("Error deleting demand:", err);
                             setError(`خطا در حذف تقاضا: ${err.message}`);
+                            addToast('خطا در حذف تقاضا', 'error');
                         }
                     }
                 });
@@ -953,15 +1054,15 @@
 
             const handleOpenModal = () => setIsModalOpen(true);
             const handleCloseModal = () => setIsModalOpen(false);
-            const handleSaveDemand = () => { fetchData(); handleCloseModal(); };
+            const handleSaveDemand = () => { fetchData(); handleCloseModal(); addToast('تقاضای جدید با موفقیت ثبت شد.') };
             
             const handleOpenEditItemModal = (item, demand) => { setEditingItem(item); setEditingDemand(demand); setIsEditItemModalOpen(true); };
             const handleCloseEditItemModal = () => { setEditingItem(null); setEditingDemand(null); setIsEditItemModalOpen(false); };
-            const handleSaveItem = () => { fetchData(); handleCloseEditItemModal(); };
+            const handleSaveItem = () => { fetchData(); handleCloseEditItemModal(); addToast('آیتم با موفقیت به‌روزرسانی شد.'); };
 
             const handleOpenManageItemsModal = (demand) => { setDemandToManage(demand); setIsManageItemsModalOpen(true); };
             const handleCloseManageItemsModal = () => { setDemandToManage(null); setIsManageItemsModalOpen(false); };
-            const handleSaveManagedItems = () => { fetchData(); handleCloseManageItemsModal(); };
+            const handleSaveManagedItems = () => { fetchData(); handleCloseManageItemsModal(); addToast('اقلام تقاضا با موفقیت مدیریت شد.'); };
             
             const groupedStatuses = React.useMemo(() => {
                 // Group statuses by their main_status (e.g., Open, Fulfilled, Cancelled)
@@ -1022,6 +1123,9 @@
                                 </div>
                             </div>
                         </div>
+                         <div className="text-xs text-gray-500 dark:text-gray-400 mt-3 border-t border-gray-200 dark:border-gray-700 pt-2">
+                            {filteredDemands.length} مورد یافت شد.
+                        </div>
                     </div>
 
                     {isLoading && <div className="spinner"></div>}
@@ -1033,11 +1137,22 @@
                             <div key={demand.id} className="bg-white dark:bg-gray-800 rounded-lg shadow transition-all hover:shadow-xl border border-gray-100 dark:border-gray-700">
                                 <header className="p-3 sm:p-4 border-b border-gray-200 dark:border-gray-700 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
                                     <div className="flex-1">
-                                        <h2 className="font-bold text-lg text-indigo-700 dark:text-indigo-400">{demand.profiles.fullname}</h2>
+                                        <div className="flex items-center gap-2">
+                                            <h2 className="font-bold text-lg text-indigo-700 dark:text-indigo-400">{demand.profiles.fullname}</h2>
+                                            {demand.location?.city?.title && (
+                                                <span className="text-sm text-gray-500 dark:text-gray-400">({demand.location.city.title})</span>
+                                            )}
+                                        </div>
                                         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-gray-500 dark:text-gray-400 mt-1">
                                             <span>شناسه: <span className="font-mono">{demand.id}</span></span>
                                             <span>تاریخ ثبت: <span className="font-semibold">{formatDateTime(demand.createdat)}</span></span>
                                             {demand.deadlinedate && <span>مهلت تحویل: <span className="font-semibold">{formatDateTime(demand.deadlinedate, false)}</span></span>}
+                                            {demand.totalValue > 0 && 
+                                                <div className="flex items-center gap-1">
+                                                    <span className="font-semibold">ارزش کل تامین:</span>
+                                                    <span className="font-semibold font-mono text-green-700 dark:text-green-400">{formatCurrency(demand.totalValue)}</span>
+                                                </div>
+                                            }
                                         </div>
                                     </div>
                                     <div className="flex items-center gap-2 self-end sm:self-center">
@@ -1152,9 +1267,9 @@
                         </div>
                     )}
 
-                    {isModalOpen && <DemandFormModal isOpen={isModalOpen} onClose={handleCloseModal} onSave={handleSaveDemand} customers={customers} products={products} />}
+                    {isModalOpen && <DemandFormModal isOpen={isModalOpen} onClose={handleCloseModal} onSave={handleSaveDemand} customers={customers} products={products} defaultStatusId={defaultStatusId} />}
                     {isEditItemModalOpen && <EditDemandItemModal isOpen={isEditItemModalOpen} onClose={handleCloseEditItemModal} onSave={handleSaveItem} itemToEdit={editingItem} demand={editingDemand} demandStatuses={demandStatuses} groupedStatuses={groupedStatuses} />}
-                    {isManageItemsModalOpen && <ManageDemandItemsModal isOpen={isManageItemsModalOpen} onClose={handleCloseManageItemsModal} onSave={handleSaveManagedItems} demandToEdit={demandToManage} products={products} />}
+                    {isManageItemsModalOpen && <ManageDemandItemsModal isOpen={isManageItemsModalOpen} onClose={handleCloseManageItemsModal} onSave={handleSaveManagedItems} demandToEdit={demandToManage} products={products} defaultStatusId={defaultStatusId} />}
                     <ConfirmModal isOpen={confirmState.isOpen} onClose={() => setConfirmState({ isOpen: false, onConfirm: null, message: '', title: '' })} onConfirm={confirmState.onConfirm} title={confirmState.title} message={confirmState.message} />
                 </div>
             );
@@ -1163,16 +1278,20 @@
         const App = () => {
              const [theme, setTheme] = React.useState('light');
              React.useEffect(() => {
-                 // Sync theme state with the document's class for Tailwind
-                 document.documentElement.className = theme;
+                  // Sync theme state with the document's class for Tailwind
+                  document.documentElement.className = theme;
              }, [theme]);
 
              const toggleTheme = () => {
                 setTheme(prev => prev === 'light' ? 'dark' : 'light');
              };
 
-             return <DemandManagement theme={theme} toggleTheme={toggleTheme} />;
-        }
+             return (
+                <ToastProvider>
+                    <DemandManagement theme={theme} toggleTheme={toggleTheme} />
+                </ToastProvider>
+             );
+         }
 
         const container = document.getElementById('root');
         const root = ReactDOM.createRoot(container);
@@ -1180,3 +1299,4 @@
     </script>
 </body>
 </html>
+
