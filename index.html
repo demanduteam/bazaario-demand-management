@@ -379,7 +379,7 @@
                     prop => prop.propertykey?.title?.toLowerCase().includes('تلگرام')
                 );
                 const telegramCode = telegramCodeProp ? telegramCodeProp.value : '';
-                const displayTitle = `${telegramCode ? `[${telegramCode}] ` : ''}${p.brand ? p.brand.title + ' ' : ''}${p.title}`;
+                const displayTitle = `(ID: ${p.id}) ${telegramCode ? `[${telegramCode}] ` : ''}${p.brand ? p.brand.title + ' ' : ''}${p.title}`;
                 return { id: p.id, title: displayTitle };
             });
 
@@ -763,12 +763,12 @@
 
              const productOptions = products.map(p => {
                  const telegramCodeProp = p.productproperty?.find(
-                     prop => prop.propertykey?.title?.toLowerCase().includes('تلگرام')
-                 );
-                 const telegramCode = telegramCodeProp ? telegramCodeProp.value : '';
-                 const displayTitle = `${telegramCode ? `[${telegramCode}] ` : ''}${p.brand ? p.brand.title + ' ' : ''}${p.title}`;
-                 return { id: p.id, title: displayTitle };
-            });
+                     prop => prop.propertykey?.title?.toLowerCase().includes('تلگرام')
+                 );
+                 const telegramCode = telegramCodeProp ? telegramCodeProp.value : '';
+                 const displayTitle = `(ID: ${p.id}) ${telegramCode ? `[${telegramCode}] ` : ''}${p.brand ? p.brand.title + ' ' : ''}${p.title}`;
+                 return { id: p.id, title: displayTitle };
+            });
 
             return (
                 <Modal isOpen={isOpen} onClose={onClose} title={`مدیریت اقلام تقاضای ${demandToEdit.profiles.fullname}`}>
@@ -1299,4 +1299,5 @@
     </script>
 </body>
 </html>
+
 
