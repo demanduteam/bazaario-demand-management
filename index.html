@@ -884,6 +884,7 @@
             const [defaultStatusId, setDefaultStatusId] = React.useState(null);
             const [confirmState, setConfirmState] = React.useState({ isOpen: false, onConfirm: null, message: '', title: '' });
 
+            const [countdown, setCountdown] = React.useState(300); // 5 minutes in seconds
             const [searchTerm, setSearchTerm] = React.useState('');
             const [statusFilter, setStatusFilter] = React.useState('open'); // Changed default from 'all' to 'open'
             const [emergencyFilter, setEmergencyFilter] = React.useState(false); 
@@ -918,8 +919,8 @@
                 return allProducts;
             };
 
-            const fetchData = async () => {
-                setIsLoading(true);
+            const fetchData = async (isAutoRefresh = false) => {
+                if (!isAutoRefresh) setIsLoading(true);
                 setError('');
                 try {
                     const { data: demandData, error: demandError } = await supabaseClient
@@ -988,13 +989,29 @@
                 {
                     console.error("Error fetching demand data:", err);
                     setError(`خطا در بارگذاری اطلاعات: ${err.message}`);
-                    addToast('خطا در بارگذاری اطلاعات', 'error');
+                    if (!isAutoRefresh) addToast('خطا در بارگذاری اطلاعات', 'error');
                 } finally {
-                    setIsLoading(false);
+                    if (!isAutoRefresh) setIsLoading(false);
                 }
             };
 
             React.useEffect(() => { fetchData(); }, []);
+
+            // Effect for countdown timer and auto-refresh
+            React.useEffect(() => {
+                const timer = setInterval(() => {
+                    setCountdown(prevCountdown => {
+                        if (prevCountdown <= 1) {
+                            console.log("Auto-refreshing data...");
+                            fetchData(true); // Fetch data
+                            return 300; // Reset countdown to 5 minutes
+                        }
+                        return prevCountdown - 1; // Decrement
+                    });
+                }, 1000); // Every second
+
+                return () => clearInterval(timer);
+            }, []); // Empty dependency array ensures this effect runs only once
             
             const filteredDemands = React.useMemo(() => {
                 return demands
@@ -1074,11 +1091,20 @@
                 }, {});
             }, [demandStatuses]);
 
+            const formatCountdown = (seconds) => {
+                const mins = String(Math.floor(seconds / 60)).padStart(2, '0');
+                const secs = String(seconds % 60).padStart(2, '0');
+                return `${mins}:${secs}`;
+            };
+
             return (
                 <div className="p-4 sm:p-6 lg:p-8">
                     <header className="flex flex-col sm:flex-row justify-between items-center mb-6 gap-4">
                         <h1 className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white">مدیریت تقاضاها</h1>
                         <div className="flex items-center gap-4">
+                            <span className="font-mono text-lg text-gray-700 dark:text-gray-300" dir="ltr" title="زمان تا به‌روزرسانی بعدی">
+                                {formatCountdown(countdown)}
+                            </span>
                             {/* Theme Toggle Button */}
                             <button onClick={toggleTheme} className="p-2 rounded-full text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition" title="تغییر تم">
                                 {theme === 'light' ? (
@@ -1299,5 +1325,3 @@
     </script>
 </body>
 </html>
-
-
