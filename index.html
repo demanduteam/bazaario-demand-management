@@ -491,6 +491,11 @@
             const [isLoading, setIsLoading] = React.useState(false);
             const [error, setError] = React.useState('');
             const [isEmergency, setIsEmergency] = React.useState(false);
+            
+            // --- MODIFIED: State for ASSIGNED suppliers ---
+            const [assignedSuppliers, setAssignedSuppliers] = React.useState([]);
+            const [isFetchingAssignments, setIsFetchingAssignments] = React.useState(false);
+            // --- END MODIFIED ---
 
             const isCancelled = React.useMemo(() => {
                 if (!statusId) return false;
@@ -519,8 +524,43 @@
                              setFormData(prev => ({...prev, demand_admin_note: itemToEdit.demand_admin_note.replace(match[0], '').trim() }));
                         }
                     }
+
+                    // --- MODIFIED: Fetch assigned suppliers ---
+                    const fetchAssignedSuppliers = async () => {
+                        if (!itemToEdit.id) return;
+                        
+                        setIsFetchingAssignments(true);
+                        setAssignedSuppliers([]);
+                        
+                        const { data, error } = await supabaseClient
+                            .from('supplier_demand_assignment')
+                            .select(`
+                                assigned_quantity,
+                                assigned_price,
+                                supplieruserid,
+                                profiles:supplieruserid (fullname),
+                                location:locationid (
+                                    address,
+                                    city (title, province(title))
+                                )
+                            `)
+                            .eq('demand_item_id', itemToEdit.id);
+
+                        if (error) {
+                            console.error("Error fetching supplier assignments:", error);
+                            // Do not set modal-wide error, just log
+                        } else {
+                            setAssignedSuppliers(data || []);
+                        }
+                        setIsFetchingAssignments(false);
+                    };
+                    
+                    fetchAssignedSuppliers();
+                    // --- END MODIFIED ---
                 }
             }, [itemToEdit, demand]);
+            
+            // --- REMOVED: Filtering logic (displayedSuppliers, priceToFilter) ---
             
             if (!itemToEdit || !demand) return null;
 
@@ -593,6 +633,56 @@
                         <div><span className="font-semibold text-gray-600 dark:text-gray-400">شهر:</span> {demand.location?.city?.title || '-'}</div>
                         <div><span className="font-semibold text-gray-600 dark:text-gray-400">برند:</span> {itemToEdit.product.brand?.title || '-'}</div>
                     </div>
+                    
+                    {/* --- MODIFIED: Supplier Info Section --- */}
+                    <div className="mb-4">
+                        <h4 className="text-md font-semibold text-gray-800 dark:text-gray-200 mb-2">تامین‌کنندگان تخصیص یافته:</h4>
+                        {isFetchingAssignments && <p className="text-sm text-gray-500">در حال بارگذاری...</p>}
+                        
+                        {!isFetchingAssignments && assignedSuppliers.length === 0 && (
+                            <p className="text-sm text-gray-500 bg-gray-100 dark:bg-gray-700 p-3 rounded-md">
+                                هیچ تامین‌کننده‌ای به این آیتم تخصیص داده نشده است.
+                            </p>
+                        )}
+
+                        {!isFetchingAssignments && assignedSuppliers.length > 0 && (
+                            <div className="border border-gray-200 dark:border-gray-700 rounded-lg max-h-48 overflow-y-auto">
+                                <ul className="divide-y divide-gray-200 dark:divide-gray-700">
+                                    {assignedSuppliers.map(assignment => {
+                                        const supplier = assignment.profiles;
+                                        const location = assignment.location;
+                                        if (!supplier || !location) return null; // Safety check
+
+                                        // Format location
+                                        let locationString = "بدون آدرس";
+                                        const city = location.city?.title || 'شهر نامشخص';
+                                        const province = location.city?.province?.title || '';
+                                        locationString = province ? `${province}، ${city}` : city;
+                                        
+                                        const displayText = `${supplier.fullname} (${locationString})`;
+                                        
+                                        return (
+                                            <li key={assignment.supplieruserid} className="p-3 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700/50">
+                                                <div className="flex flex-col sm:flex-row justify-between sm:items-center text-sm gap-2">
+                                                    <span className="font-semibold text-gray-900 dark:text-gray-100">{displayText}</span>
+                                                    <div className="flex gap-4 items-center">
+                                                        <span className="text-gray-700 dark:text-gray-300">
+                                                            تعداد: <span className={`font-bold font-mono ${assignment.assigned_quantity > 0 ? 'text-blue-600 dark:text-blue-400' : 'text-red-600 dark:text-red-400'}`}>{assignment.assigned_quantity}</span>
+                                                        </span>
+                                                        <span className="text-gray-700 dark:text-gray-300">
+                                                            قیمت: <span className="font-bold text-green-600 dark:text-green-400 font-mono">{formatCurrency(assignment.assigned_price)}</span>
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                            </li>
+                                        );
+                                    })}
+                                </ul>
+                            </div>
+                        )}
+                    </div>
+                    {/* --- END MODIFIED --- */}
+
                     <form onSubmit={handleSubmit} className="space-y-4">
                         <div className="flex items-center">
                             <input type="checkbox" id="is_emergency_edit_item" checked={isEmergency} onChange={(e) => setIsEmergency(e.target.checked)} className="ml-2 h-4 w-4 rounded text-red-600 border-red-300 focus:ring-red-500" />
@@ -702,6 +792,8 @@
                     const itemIdsToDelete = [...originalItemIds].filter(id => !finalItemIds.has(id));
                     
                     if (itemIdsToDelete.length > 0) {
+                        // Also delete from supplier_demand_assignment
+                        await supabaseClient.from('supplier_demand_assignment').delete().in('demand_item_id', itemIdsToDelete);
                         await supabaseClient.from('demandstatuslog').delete().in('demand_item_id', itemIdsToDelete);
                         const { error: deleteError } = await supabaseClient.from('demand_item').delete().in('id', itemIdsToDelete);
                         if (deleteError) throw deleteError;
@@ -763,12 +855,12 @@
 
              const productOptions = products.map(p => {
                  const telegramCodeProp = p.productproperty?.find(
-                     prop => prop.propertykey?.title?.toLowerCase().includes('تلگرام')
-                 );
-                 const telegramCode = telegramCodeProp ? telegramCodeProp.value : '';
-                 const displayTitle = `(ID: ${p.id}) ${telegramCode ? `[${telegramCode}] ` : ''}${p.brand ? p.brand.title + ' ' : ''}${p.title}`;
-                 return { id: p.id, title: displayTitle };
-            });
+                     prop => prop.propertykey?.title?.toLowerCase().includes('تلگرام')
+                 );
+                 const telegramCode = telegramCodeProp ? telegramCodeProp.value : '';
+                 const displayTitle = `(ID: ${p.id}) ${telegramCode ? `[${telegramCode}] ` : ''}${p.brand ? p.brand.title + ' ' : ''}${p.title}`;
+                 return { id: p.id, title: displayTitle };
+             });
 
             return (
                 <Modal isOpen={isOpen} onClose={onClose} title={`مدیریت اقلام تقاضای ${demandToEdit.profiles.fullname}`}>
@@ -838,13 +930,13 @@
             }, []);
 
             const ToastIcon = ({ type }) => {
-              if (type === 'success') {
-                return <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>;
-              }
-              if (type === 'error') {
+             if (type === 'success') {
+               return <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>;
+             }
+             if (type === 'error') {
                  return <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>;
-              }
-              return null;
+             }
+             return null;
             }
 
             return (
@@ -1053,6 +1145,8 @@
                             setConfirmState({ isOpen: false });
                             const itemIds = demands.find(d => d.id === demandId)?.demand_item.map(i => i.id) || [];
                             if(itemIds.length > 0) {
+                                // Also delete from supplier_demand_assignment
+                                await supabaseClient.from('supplier_demand_assignment').delete().in('demand_item_id', itemIds);
                                 await supabaseClient.from('demandstatuslog').delete().in('demand_item_id', itemIds);
                                 // Optional: Delete demand_item_log entries as well if used
                             }
@@ -1309,13 +1403,13 @@
              }, [theme]);
 
              const toggleTheme = () => {
-                setTheme(prev => prev === 'light' ? 'dark' : 'light');
+                 setTheme(prev => prev === 'light' ? 'dark' : 'light');
              };
 
              return (
-                <ToastProvider>
-                    <DemandManagement theme={theme} toggleTheme={toggleTheme} />
-                </ToastProvider>
+                 <ToastProvider>
+                     <DemandManagement theme={theme} toggleTheme={toggleTheme} />
+                 </ToastProvider>
              );
          }
 
