@@ -14,15 +14,15 @@
                     fontFamily: {
                         vazir: ['Vazirmatn', 'sans-serif'],
                     },
-                     keyframes: {
+                      keyframes: {
                         'toast-in': {
                           'from': { transform: 'translateX(100%)', opacity: '0' },
                           'to': { transform: 'translateX(0)', opacity: '1' },
                         },
-                     },
-                     animation: {
+                      },
+                      animation: {
                         'toast-in': 'toast-in 0.5s ease-out forwards',
-                     }
+                      }
                 },
             },
         }
@@ -85,7 +85,8 @@
         // ==================================================
         // Supabase Client Setup
         // ==================================================
-        const { createClient } = supabase;
+        // Access supabase from window object to avoid ReferenceError
+        const { createClient } = window.supabase;
 
         // Note: The Supabase variables __supabase_url and __supabase_anon_key are expected to be available globally in the execution environment.
         const supabaseUrl = typeof __supabase_url !== 'undefined' ? __supabase_url : 'https://wehyjatotbzxargnxasg.supabase.co';
@@ -129,6 +130,15 @@
                 console.error("Error formatting datetime:", e);
                 return dateString;
             }
+        };
+
+        const timeAgo = (dateString) => {
+            if (!dateString) return '';
+            const diff = new Date() - new Date(dateString);
+            const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+            if (days === 0) return 'امروز';
+            if (days === 1) return 'دیروز';
+            return `${days} روز پیش`;
         };
 
         const Modal = ({ isOpen, onClose, title, children }) => {
@@ -467,8 +477,8 @@
                                                 </div>
                                             )}
                                         </div>
-                                        )
-                                    })}
+                                    )
+                                })}
                             </div>
                             <button type="button" onClick={handleAddItem} className="mt-4 w-full text-center py-2 px-4 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition font-semibold">+ افزودن کالا</button>
                         </div>
@@ -492,10 +502,15 @@
             const [error, setError] = React.useState('');
             const [isEmergency, setIsEmergency] = React.useState(false);
             
-            // --- MODIFIED: State for ASSIGNED suppliers ---
+            // --- Assignment State ---
             const [assignedSuppliers, setAssignedSuppliers] = React.useState([]);
             const [isFetchingAssignments, setIsFetchingAssignments] = React.useState(false);
-            // --- END MODIFIED ---
+            const [stockSuppliers, setStockSuppliers] = React.useState([]); // Suppliers with stock of this product
+            const [supplierLocations, setSupplierLocations] = React.useState([]); // Locations for selected supplier
+            const [newAssignment, setNewAssignment] = React.useState({ supplierId: '', locationId: '', price: '', quantity: '' });
+            const [isAssigning, setIsAssigning] = React.useState(false);
+            const { addToast } = useToasts();
+            // --- End Assignment State ---
 
             const isCancelled = React.useMemo(() => {
                 if (!statusId) return false;
@@ -505,8 +520,36 @@
 
             const cancellationReasons = ["قیمت بالا", "عدم موجودی", "عدم پاسخگویی", "به تعویق افتاده", "خرید از رقبا", "درخواست تعداد پایین", "درخواست تنوع", "هزینه ارسال بالا", "عدم اعتماد", "فاکتور بی‌پاسخ", "خرید چکی"];
 
+            // Fetch Assignments Wrapper
+            const fetchAssignedSuppliers = React.useCallback(async () => {
+                if (!itemToEdit?.id) return;
+                
+                setIsFetchingAssignments(true);
+                const { data, error } = await supabaseClient
+                    .from('supplier_demand_assignment')
+                    .select(`
+                        id,
+                        assigned_quantity,
+                        assigned_price,
+                        supplieruserid,
+                        profiles:supplieruserid (fullname),
+                        location:locationid (
+                            address,
+                            city (title, province(title))
+                        )
+                    `)
+                    .eq('demand_item_id', itemToEdit.id);
+
+                if (error) {
+                    console.error("Error fetching supplier assignments:", error);
+                } else {
+                    setAssignedSuppliers(data || []);
+                }
+                setIsFetchingAssignments(false);
+            }, [itemToEdit?.id]);
+
             React.useEffect(() => {
-                if (itemToEdit && demand) {
+                if (isOpen && itemToEdit && demand) {
                     setFormData({
                         quantity: itemToEdit.quantity || '',
                         demand_admin_note: itemToEdit.demand_admin_note || '',
@@ -525,43 +568,100 @@
                         }
                     }
 
-                    // --- MODIFIED: Fetch assigned suppliers ---
-                    const fetchAssignedSuppliers = async () => {
-                        if (!itemToEdit.id) return;
-                        
-                        setIsFetchingAssignments(true);
-                        setAssignedSuppliers([]);
-                        
-                        const { data, error } = await supabaseClient
-                            .from('supplier_demand_assignment')
-                            .select(`
-                                assigned_quantity,
-                                assigned_price,
-                                supplieruserid,
-                                profiles:supplieruserid (fullname),
-                                location:locationid (
-                                    address,
-                                    city (title, province(title))
-                                )
-                            `)
-                            .eq('demand_item_id', itemToEdit.id);
-
-                        if (error) {
-                            console.error("Error fetching supplier assignments:", error);
-                            // Do not set modal-wide error, just log
-                        } else {
-                            setAssignedSuppliers(data || []);
-                        }
-                        setIsFetchingAssignments(false);
-                    };
+                    // Reset assignment form
+                    setNewAssignment({ supplierId: '', locationId: '', price: '', quantity: '' });
+                    setSupplierLocations([]);
                     
+                    // Fetch existing assignments
                     fetchAssignedSuppliers();
-                    // --- END MODIFIED ---
+
+                    // Fetch Suppliers with stock
+                    const fetchStock = async () => {
+                        if(!itemToEdit.product?.id) return;
+                        const { data, error } = await supabaseClient
+                            .from('supplierstock')
+                            .select('unitprice, supplieruserid, profiles:supplieruserid(fullname)')
+                            .eq('productid', itemToEdit.product.id);
+                        if(data) setStockSuppliers(data);
+                    };
+                    fetchStock();
                 }
-            }, [itemToEdit, demand]);
+            }, [isOpen, itemToEdit, demand, fetchAssignedSuppliers]);
+
+            // Fetch locations when a supplier is selected in assignment form
+            React.useEffect(() => {
+                if(!newAssignment.supplierId) {
+                    setSupplierLocations([]);
+                    return;
+                }
+                const fetchLocs = async () => {
+                     const { data } = await supabaseClient
+                        .from('userlocation')
+                        .select('location(*, city(*, province(*)))')
+                        .eq('userid', newAssignment.supplierId);
+                     if(data) setSupplierLocations(data.map(ul => ul.location).filter(l => l));
+                }
+                fetchLocs();
+            }, [newAssignment.supplierId]);
             
-            // --- REMOVED: Filtering logic (displayedSuppliers, priceToFilter) ---
+            const handleAssignmentChange = (e) => {
+                const { name, value } = e.target;
+                setNewAssignment(prev => ({ ...prev, [name]: value }));
+                
+                // If supplier changed, try to auto-fill price from stock
+                if (name === 'supplierId') {
+                    const stockInfo = stockSuppliers.find(s => s.supplieruserid === value);
+                    if (stockInfo) {
+                        setNewAssignment(prev => ({ ...prev, supplierId: value, price: stockInfo.unitprice, locationId: '' }));
+                    } else {
+                         setNewAssignment(prev => ({ ...prev, supplierId: value, locationId: '' }));
+                    }
+                }
+            };
+
+            const handleAssignSupplier = async () => {
+                if (!newAssignment.supplierId || !newAssignment.quantity || !newAssignment.price) {
+                    setError("لطفا تامین‌کننده، تعداد و قیمت را مشخص کنید.");
+                    return;
+                }
+                setIsAssigning(true);
+                setError('');
+                try {
+                    const { error } = await supabaseClient.from('supplier_demand_assignment').insert({
+                        demand_item_id: itemToEdit.id,
+                        supplieruserid: newAssignment.supplierId,
+                        locationid: newAssignment.locationId || null,
+                        assigned_quantity: Number(newAssignment.quantity),
+                        assigned_price: Number(newAssignment.price)
+                    });
+
+                    if (error) throw error;
+
+                    await fetchAssignedSuppliers();
+                    setNewAssignment({ supplierId: '', locationId: '', price: '', quantity: '' });
+                    setSupplierLocations([]);
+                    addToast("تامین‌کننده با موفقیت تخصیص یافت.", "success");
+                } catch (err) {
+                    console.error("Assignment error:", err);
+                    setError("خطا در تخصیص تامین‌کننده.");
+                } finally {
+                    setIsAssigning(false);
+                }
+            };
             
+            const handleDeleteAssignment = async (assignmentId) => {
+                if(!confirm("آیا از حذف این تخصیص اطمینان دارید؟")) return;
+                
+                const { error } = await supabaseClient.from('supplier_demand_assignment').delete().eq('id', assignmentId);
+                if (error) {
+                     console.error("Error deleting assignment:", error);
+                     addToast("خطا در حذف تخصیص.", "error");
+                } else {
+                    fetchAssignedSuppliers();
+                    addToast("تخصیص حذف شد.", "success");
+                }
+            };
+
             if (!itemToEdit || !demand) return null;
 
             const handleChange = (e) => {
@@ -634,54 +734,84 @@
                         <div><span className="font-semibold text-gray-600 dark:text-gray-400">برند:</span> {itemToEdit.product.brand?.title || '-'}</div>
                     </div>
                     
-                    {/* --- MODIFIED: Supplier Info Section --- */}
-                    <div className="mb-4">
-                        <h4 className="text-md font-semibold text-gray-800 dark:text-gray-200 mb-2">تامین‌کنندگان تخصیص یافته:</h4>
-                        {isFetchingAssignments && <p className="text-sm text-gray-500">در حال بارگذاری...</p>}
+                    {/* --- Assignment Section --- */}
+                    <div className="mb-6 border-b border-gray-200 dark:border-gray-700 pb-6">
+                        <h4 className="text-md font-bold text-gray-800 dark:text-gray-200 mb-3 flex items-center gap-2">
+                             <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-indigo-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0z" /></svg>
+                             مدیریت تامین‌کنندگان
+                        </h4>
                         
-                        {!isFetchingAssignments && assignedSuppliers.length === 0 && (
-                            <p className="text-sm text-gray-500 bg-gray-100 dark:bg-gray-700 p-3 rounded-md">
-                                هیچ تامین‌کننده‌ای به این آیتم تخصیص داده نشده است.
-                            </p>
-                        )}
-
-                        {!isFetchingAssignments && assignedSuppliers.length > 0 && (
-                            <div className="border border-gray-200 dark:border-gray-700 rounded-lg max-h-48 overflow-y-auto">
-                                <ul className="divide-y divide-gray-200 dark:divide-gray-700">
-                                    {assignedSuppliers.map(assignment => {
-                                        const supplier = assignment.profiles;
-                                        const location = assignment.location;
-                                        if (!supplier || !location) return null; // Safety check
-
-                                        // Format location
-                                        let locationString = "بدون آدرس";
-                                        const city = location.city?.title || 'شهر نامشخص';
-                                        const province = location.city?.province?.title || '';
-                                        locationString = province ? `${province}، ${city}` : city;
-                                        
-                                        const displayText = `${supplier.fullname} (${locationString})`;
-                                        
-                                        return (
-                                            <li key={assignment.supplieruserid} className="p-3 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700/50">
-                                                <div className="flex flex-col sm:flex-row justify-between sm:items-center text-sm gap-2">
-                                                    <span className="font-semibold text-gray-900 dark:text-gray-100">{displayText}</span>
-                                                    <div className="flex gap-4 items-center">
-                                                        <span className="text-gray-700 dark:text-gray-300">
-                                                            تعداد: <span className={`font-bold font-mono ${assignment.assigned_quantity > 0 ? 'text-blue-600 dark:text-blue-400' : 'text-red-600 dark:text-red-400'}`}>{assignment.assigned_quantity}</span>
-                                                        </span>
-                                                        <span className="text-gray-700 dark:text-gray-300">
-                                                            قیمت: <span className="font-bold text-green-600 dark:text-green-400 font-mono">{formatCurrency(assignment.assigned_price)}</span>
-                                                        </span>
+                        {/* List of assignments */}
+                        {isFetchingAssignments ? <p className="text-sm text-gray-500">در حال بارگذاری...</p> : (
+                            assignedSuppliers.length > 0 ? (
+                                <div className="border border-gray-200 dark:border-gray-700 rounded-lg max-h-40 overflow-y-auto mb-4">
+                                    <ul className="divide-y divide-gray-200 dark:divide-gray-700">
+                                        {assignedSuppliers.map(assignment => {
+                                            const supplier = assignment.profiles;
+                                            const location = assignment.location;
+                                            if (!supplier) return null;
+                                            const city = location?.city?.title || 'شهر نامشخص';
+                                            const province = location?.city?.province?.title || '';
+                                            const locationString = province ? `${province}، ${city}` : city;
+                                            
+                                            return (
+                                                <li key={assignment.id} className="p-3 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700/50 flex justify-between items-center text-sm">
+                                                    <div>
+                                                        <div className="font-semibold text-gray-900 dark:text-gray-100">{supplier.fullname} <span className="text-xs font-normal text-gray-500">({locationString})</span></div>
+                                                        <div className="text-xs text-gray-500 mt-1">
+                                                            تعداد: <span className="font-mono font-bold text-gray-700 dark:text-gray-300">{assignment.assigned_quantity}</span> | قیمت: <span className="font-mono font-bold text-green-600">{formatCurrency(assignment.assigned_price)}</span>
+                                                        </div>
                                                     </div>
-                                                </div>
-                                            </li>
-                                        );
-                                    })}
-                                </ul>
-                            </div>
+                                                    <button onClick={() => handleDeleteAssignment(assignment.id)} className="text-red-500 hover:text-red-700 p-1" title="حذف تخصیص">
+                                                         <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm4 0a1 1 0 012 0v6a1 1 0 11-2 0V8z" clipRule="evenodd" /></svg>
+                                                    </button>
+                                                </li>
+                                            );
+                                        })}
+                                    </ul>
+                                </div>
+                            ) : (
+                                <p className="text-sm text-gray-500 bg-gray-100 dark:bg-gray-700 p-2 rounded-md mb-4">تامین‌کننده‌ای تخصیص داده نشده است.</p>
+                            )
                         )}
+                        
+                        {/* New Assignment Form */}
+                        <div className="bg-gray-50 dark:bg-gray-700/30 p-3 rounded-lg border border-gray-200 dark:border-gray-700">
+                             <h5 className="text-sm font-semibold mb-3 text-indigo-700 dark:text-indigo-400">تخصیص تامین‌کننده جدید:</h5>
+                             <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
+                                 <div>
+                                     <label className="block text-xs font-medium text-gray-600 dark:text-gray-300 mb-1">تامین‌کننده (از موجودی کالا)</label>
+                                     <select name="supplierId" value={newAssignment.supplierId} onChange={handleAssignmentChange} className="w-full text-sm p-2 rounded border-gray-300 bg-white dark:bg-gray-700">
+                                         <option value="">انتخاب کنید...</option>
+                                         {stockSuppliers.map(s => (
+                                             <option key={s.supplieruserid} value={s.supplieruserid}>{s.profiles.fullname} - {formatCurrency(s.unitprice)}</option>
+                                         ))}
+                                     </select>
+                                     {stockSuppliers.length === 0 && <p className="text-xs text-yellow-600 mt-1">هیچ تامین‌کننده‌ای موجودی این کالا را ندارد.</p>}
+                                 </div>
+                                 <div>
+                                     <label className="block text-xs font-medium text-gray-600 dark:text-gray-300 mb-1">انبار / آدرس</label>
+                                     <select name="locationId" value={newAssignment.locationId} onChange={handleAssignmentChange} className="w-full text-sm p-2 rounded border-gray-300 bg-white dark:bg-gray-700" disabled={!newAssignment.supplierId}>
+                                         <option value="">انتخاب کنید...</option>
+                                         {supplierLocations.map(loc => (
+                                             <option key={loc.id} value={loc.id}>{loc.city?.title} - {loc.address}</option>
+                                         ))}
+                                     </select>
+                                 </div>
+                                 <div>
+                                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-300 mb-1">تعداد</label>
+                                      <input type="number" name="quantity" value={newAssignment.quantity} onChange={handleAssignmentChange} className="w-full text-sm p-2 rounded border-gray-300 bg-white dark:bg-gray-700" placeholder="تعداد" />
+                                 </div>
+                                 <div>
+                                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-300 mb-1">قیمت واحد (تومان)</label>
+                                      <input type="number" name="price" value={newAssignment.price} onChange={handleAssignmentChange} className="w-full text-sm p-2 rounded border-gray-300 bg-white dark:bg-gray-700" placeholder="قیمت" />
+                                 </div>
+                             </div>
+                             <button type="button" onClick={handleAssignSupplier} disabled={isAssigning} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold py-2 px-4 rounded transition disabled:bg-indigo-400">
+                                 {isAssigning ? 'در حال تخصیص...' : '+ افزودن تخصیص'}
+                             </button>
+                        </div>
                     </div>
-                    {/* --- END MODIFIED --- */}
 
                     <form onSubmit={handleSubmit} className="space-y-4">
                         <div className="flex items-center">
@@ -818,7 +948,7 @@
                          if (logsToInsert.length > 0) {
                              const { error: logError } = await supabaseClient.from('demandstatuslog').insert(logsToInsert);
                              if (logError) console.error("Error logging status for new items:", logError);
-                         }
+                          }
                     }
                     
                     if (itemsToUpdate.length > 0) {
@@ -960,6 +1090,7 @@
         // The Main Application Component
         // ==================================================
         const DemandManagement = ({ theme, toggleTheme }) => {
+            const [activeTab, setActiveTab] = React.useState('demands'); // 'demands' or 'retargeting'
             const [demands, setDemands] = React.useState([]);
             const [isLoading, setIsLoading] = React.useState(true);
             const [error, setError] = React.useState('');
@@ -970,6 +1101,14 @@
             const [isManageItemsModalOpen, setIsManageItemsModalOpen] = React.useState(false);
             const [demandToManage, setDemandToManage] = React.useState(null);
             
+            // Retargeting State
+            const [retargetingItems, setRetargetingItems] = React.useState([]);
+            const [isRetargetingLoading, setIsRetargetingLoading] = React.useState(false);
+            const [retargetingSearchTerm, setRetargetingSearchTerm] = React.useState('');
+            const [retargetingTimeFilter, setRetargetingTimeFilter] = React.useState('all');
+            // --- NEW: Cancellation Time Filter State ---
+            const [retargetingCancellationFilter, setRetargetingCancellationFilter] = React.useState('all');
+
             const [customers, setCustomers] = React.useState([]);
             const [products, setProducts] = React.useState([]);
             const [demandStatuses, setDemandStatuses] = React.useState([]);
@@ -1021,7 +1160,7 @@
                             id, createdat, deadlinedate, is_emergency,
                             profiles (id, fullname, mobile),
                             location (*, city(*, province(*))),
-                            demand_item ( id, quantity, approved_supply_price, approved_supply_quantity, demand_admin_note, supply_admin_note, demandstatusid, product ( id, title, brand(*), productproperty(*, propertykey(*)) ), demandstatustype(*) )
+                            demand_item ( id, quantity, approved_supply_price, approved_supply_quantity, demand_admin_note, supply_admin_note, demandstatusid, productid, product ( id, title, brand(*), productproperty(*, propertykey(*)) ), demandstatustype(*) )
                         `)
                         .order('createdat', { ascending: false });
                     if (demandError) throw demandError;
@@ -1089,6 +1228,86 @@
 
             React.useEffect(() => { fetchData(); }, []);
 
+            // Fetch Retargeting Data when tab changes
+            React.useEffect(() => {
+                if (activeTab === 'retargeting' && demands.length > 0) {
+                    fetchRetargetingData();
+                }
+            }, [activeTab, demands]);
+
+            const fetchRetargetingData = async () => {
+                setIsRetargetingLoading(true);
+                try {
+                    // 1. Identify cancelled items
+                    const cancelled = [];
+                    demands.forEach(d => {
+                        d.demand_item.forEach(item => {
+                            // Focus on Cancelled items
+                            if (item.demandstatustype?.main_status === 'Cancelled' && (item.product || item.productid)) {
+                                 // Check if already retargeted
+                                 if (item.demand_admin_note && item.demand_admin_note.includes('[Retargeted]')) return;
+
+                                cancelled.push({
+                                    ...item,
+                                    productid: item.productid || item.product?.id,
+                                    customer: d.profiles,
+                                    location: d.location,
+                                    demandDate: d.createdat
+                                });
+                            }
+                        });
+                    });
+
+                    if (cancelled.length === 0) {
+                        setRetargetingItems([]);
+                        setIsRetargetingLoading(false);
+                        return;
+                    }
+
+                    // 2. Fetch current stock for these products
+                    const productIds = [...new Set(cancelled.map(i => i.productid))].filter(id => id !== undefined && id !== null);
+                    
+                    if (productIds.length === 0) {
+                         setRetargetingItems([]);
+                         setIsRetargetingLoading(false);
+                         return;
+                    }
+
+                    // Note: Supabase limits 'in' filter to a certain number of items, usually enough for this scale.
+                    // If productIds is huge, active chunking might be needed, but OK for now.
+                    const { data: stock, error } = await supabaseClient
+                        .from('supplierstock')
+                        .select(`
+                            productid, 
+                            unitprice, 
+                            lastupdatedat, 
+                            supplieruserid,
+                            profiles:supplieruserid (fullname, mobile)
+                        `)
+                        .in('productid', productIds);
+                        
+                    if (error) throw error;
+
+                    // 3. Match Stock to Cancelled Items
+                    const opportunities = cancelled.map(item => {
+                        // Find suppliers who have stock for this item's product
+                        const availableSuppliers = stock ? stock.filter(s => s.productid === item.productid) : [];
+                        return {
+                            ...item,
+                            availableSuppliers
+                        };
+                    }).filter(item => item.availableSuppliers.length > 0); // Only keep items where at least one supplier has stock
+
+                    setRetargetingItems(opportunities);
+
+                } catch (e) {
+                    console.error("Retargeting fetch error", e);
+                    addToast("خطا در دریافت لیست بازاریابی مجدد", "error");
+                } finally {
+                    setIsRetargetingLoading(false);
+                }
+            };
+
             // Effect for countdown timer and auto-refresh
             React.useEffect(() => {
                 const timer = setInterval(() => {
@@ -1135,6 +1354,43 @@
                     );
             }, [demands, searchTerm, statusFilter, emergencyFilter, awaitingCustomerFilter]);
 
+            // Filter logic for Retargeting
+            const filteredRetargetingItems = React.useMemo(() => {
+                return retargetingItems.filter(item => {
+                    // Search Logic
+                    const searchLower = retargetingSearchTerm.toLowerCase();
+                    const matchesSearch = !retargetingSearchTerm || 
+                        item.product?.title?.toLowerCase().includes(searchLower) ||
+                        item.product?.brand?.title?.toLowerCase().includes(searchLower) ||
+                        item.customer?.fullname?.toLowerCase().includes(searchLower) ||
+                        item.customer?.mobile?.includes(searchLower);
+
+                    // Time Filter Logic (Stock)
+                    if (!matchesSearch) return false;
+                    
+                    if (retargetingTimeFilter === '7days') {
+                        const sevenDaysAgo = new Date();
+                        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+                        // Check if ANY supplier has updated in the last 7 days
+                        const hasRecentStock = item.availableSuppliers.some(s => new Date(s.lastupdatedat) >= sevenDaysAgo);
+                        if (!hasRecentStock) return false;
+                    }
+
+                    // --- NEW: Time Filter Logic (Cancellation/Demand Date) ---
+                    if (retargetingCancellationFilter !== 'all') {
+                        const days = parseInt(retargetingCancellationFilter);
+                        if (!isNaN(days)) {
+                            const cutoffDate = new Date();
+                            cutoffDate.setDate(cutoffDate.getDate() - days);
+                            // We use item.demandDate (which is technically creation date here) as proxy
+                            if (new Date(item.demandDate) < cutoffDate) return false;
+                        }
+                    }
+                    
+                    return true;
+                });
+            }, [retargetingItems, retargetingSearchTerm, retargetingTimeFilter, retargetingCancellationFilter]);
+
             const handleDeleteDemand = (demandId) => {
                 setConfirmState({
                     isOpen: true,
@@ -1158,6 +1414,79 @@
                             console.error("Error deleting demand:", err);
                             setError(`خطا در حذف تقاضا: ${err.message}`);
                             addToast('خطا در حذف تقاضا', 'error');
+                        }
+                    }
+                });
+            };
+
+            const handleReissueDemand = (item) => {
+                setConfirmState({
+                    isOpen: true,
+                    title: 'صدور مجدد تقاضا',
+                    message: `آیا از صدور تقاضای جدید برای مشتری ${item.customer?.fullname} جهت محصول ${item.product?.title} اطمینان دارید؟`,
+                    onConfirm: async () => {
+                        setIsRetargetingLoading(true);
+                        setConfirmState({ isOpen: false, onConfirm: null, message: '', title: '' }); // Close modal immediately
+                        try {
+                            // 1. Create new Demand Header
+                            const { data: newDemand, error: demandError } = await supabaseClient
+                                .from('demand')
+                                .insert({
+                                    customeruserid: item.customer.id,
+                                    locationid: item.location?.id || null, // Reuse location if available
+                                    is_emergency: false, // Default to normal unless specified otherwise
+                                })
+                                .select()
+                                .single();
+
+                            if (demandError) throw demandError;
+
+                            // 2. Create new Demand Item
+                            const { data: newItem, error: itemError } = await supabaseClient
+                                .from('demand_item')
+                                .insert({
+                                    demandid: newDemand.id,
+                                    productid: item.productid,
+                                    quantity: item.quantity, // Use original quantity
+                                    demand_admin_note: `Retargeted from cancelled item ID: ${item.id}`, // Add note linking back
+                                    demandstatusid: defaultStatusId // Use the default open status
+                                })
+                                .select()
+                                .single();
+
+                            if (itemError) throw itemError;
+
+                            // 3. Log status
+                            await supabaseClient
+                                .from('demandstatuslog')
+                                .insert({
+                                    demand_item_id: newItem.id,
+                                    demandstatusid: defaultStatusId
+                                });
+
+                            // 4. Update old item to mark as retargeted so it disappears from the list
+                            const { error: updateOldError } = await supabaseClient
+                                .from('demand_item')
+                                .update({ 
+                                    demand_admin_note: (item.demand_admin_note ? item.demand_admin_note + ' ' : '') + '[Retargeted]' 
+                                })
+                                .eq('id', item.id);
+
+                            if (updateOldError) {
+                                console.error("Error updating old item:", updateOldError);
+                                // We continue even if this fails, or maybe show a warning? 
+                                // Best to just log it. The primary action (reissue) succeeded.
+                            }
+
+                            addToast('تقاضای جدید با موفقیت صادر شد', 'success');
+                            fetchData(); // Refresh demands list
+                            // Optionally refresh retargeting list if needed, but not strictly required as the old one stays "cancelled" until acted upon or logic changes
+                            
+                        } catch (err) {
+                            console.error("Error reissuing demand:", err);
+                            addToast(`خطا در صدور مجدد: ${err.message}`, 'error');
+                        } finally {
+                            setIsRetargetingLoading(false);
                         }
                     }
                 });
@@ -1215,175 +1544,300 @@
                         </div>
                     </header>
                     
-                    <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow mb-6">
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 items-end">
-                            <div className="lg:col-span-2 relative">
-                                <label className="text-sm font-medium text-gray-600 dark:text-gray-300 mb-1 block">جستجو</label>
-                                <input type="text" placeholder="جستجوی مشتری، محصول یا شناسه..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="w-full p-2 bg-gray-100 dark:bg-gray-700 border border-transparent focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 rounded-lg" />
-                                {searchTerm && (
-                                    <button onClick={() => setSearchTerm('')} className="absolute left-2 bottom-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200">
-                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" /></svg>
-                                    </button>
-                                )}
-                            </div>
-                            <div>
-                                <label className="text-sm font-medium text-gray-600 dark:text-gray-300 mb-1 block">وضعیت تقاضا</label>
-                                <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className="w-full p-2 bg-gray-100 dark:bg-gray-700 border border-transparent focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 rounded-lg">
-                                    <option value="all">همه</option><option value="open">باز</option><option value="fulfilled">تکمیل شده</option><option value="cancelled">لغو شده</option>
-                                </select>
-                            </div>
-                            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-self-start pb-2 gap-x-6 gap-y-2">
-                               <div className="flex items-center">
-                                    <input type="checkbox" id="emergencyFilter" checked={emergencyFilter} onChange={e => setEmergencyFilter(e.target.checked)} className="ml-2 h-4 w-4 rounded text-indigo-600 border-gray-300 focus:ring-indigo-500" />
-                                    <label htmlFor="emergencyFilter" className="text-sm font-medium">فقط فوری‌ها</label>
-                                </div>
-                                <div className="flex items-center">
-                                    <input type="checkbox" id="awaitingCustomerFilter" checked={awaitingCustomerFilter} onChange={e => setAwaitingCustomerFilter(e.target.checked)} className="ml-2 h-4 w-4 rounded text-indigo-600 border-gray-300 focus:ring-indigo-500" />
-                                    <label htmlFor="awaitingCustomerFilter" className="text-sm font-medium whitespace-nowrap">کالا تامین شد (منتظر مشتری)</label>
-                                </div>
-                            </div>
-                        </div>
-                         <div className="text-xs text-gray-500 dark:text-gray-400 mt-3 border-t border-gray-200 dark:border-gray-700 pt-2">
-                            {filteredDemands.length} مورد یافت شد.
-                        </div>
+                    {/* Tabs Navigation */}
+                    <div className="flex border-b border-gray-200 dark:border-gray-700 mb-6 overflow-x-auto">
+                        <button 
+                            className={`py-3 px-6 font-medium text-sm border-b-2 transition-colors whitespace-nowrap ${activeTab === 'demands' ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400' : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'}`}
+                            onClick={() => setActiveTab('demands')}
+                        >
+                            تقاضاهای فعال
+                        </button>
+                        <button 
+                            className={`py-3 px-6 font-medium text-sm border-b-2 transition-colors whitespace-nowrap flex items-center gap-2 ${activeTab === 'retargeting' ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400' : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'}`}
+                            onClick={() => setActiveTab('retargeting')}
+                        >
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                            بازاریابی مجدد (Retargeting)
+                        </button>
                     </div>
 
-                    {isLoading && <div className="spinner"></div>}
-                    {error && <p className="text-center text-red-500 bg-red-100 dark:bg-red-900/50 p-4 rounded-lg">{error}</p>}
-
-                    {!isLoading && (
-                        <div className="space-y-4">
-                        {filteredDemands.map(demand => (
-                            <div key={demand.id} className="bg-white dark:bg-gray-800 rounded-lg shadow transition-all hover:shadow-xl border border-gray-100 dark:border-gray-700">
-                                <header className="p-3 sm:p-4 border-b border-gray-200 dark:border-gray-700 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
-                                    <div className="flex-1">
-                                        <div className="flex items-center gap-2">
-                                            <h2 className="font-bold text-lg text-indigo-700 dark:text-indigo-400">{demand.profiles.fullname}</h2>
-                                            {demand.location?.city?.title && (
-                                                <span className="text-sm text-gray-500 dark:text-gray-400">({demand.location.city.title})</span>
-                                            )}
+                    {/* Content for Active Demands */}
+                    {activeTab === 'demands' && (
+                        <>
+                            <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow mb-6">
+                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 items-end">
+                                    <div className="lg:col-span-2 relative">
+                                        <label className="text-sm font-medium text-gray-600 dark:text-gray-300 mb-1 block">جستجو</label>
+                                        <input type="text" placeholder="جستجوی مشتری، محصول یا شناسه..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="w-full p-2 bg-gray-100 dark:bg-gray-700 border border-transparent focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 rounded-lg" />
+                                        {searchTerm && (
+                                            <button onClick={() => setSearchTerm('')} className="absolute left-2 bottom-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200">
+                                                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" /></svg>
+                                            </button>
+                                        )}
+                                    </div>
+                                    <div>
+                                        <label className="text-sm font-medium text-gray-600 dark:text-gray-300 mb-1 block">وضعیت تقاضا</label>
+                                        <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className="w-full p-2 bg-gray-100 dark:bg-gray-700 border border-transparent focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 rounded-lg">
+                                            <option value="all">همه</option><option value="open">باز</option><option value="fulfilled">تکمیل شده</option><option value="cancelled">لغو شده</option>
+                                        </select>
+                                    </div>
+                                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-self-start pb-2 gap-x-6 gap-y-2">
+                                    <div className="flex items-center">
+                                            <input type="checkbox" id="emergencyFilter" checked={emergencyFilter} onChange={e => setEmergencyFilter(e.target.checked)} className="ml-2 h-4 w-4 rounded text-indigo-600 border-gray-300 focus:ring-indigo-500" />
+                                            <label htmlFor="emergencyFilter" className="text-sm font-medium">فقط فوری‌ها</label>
                                         </div>
-                                        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-gray-500 dark:text-gray-400 mt-1">
-                                            <span>شناسه: <span className="font-mono">{demand.id}</span></span>
-                                            <span>تاریخ ثبت: <span className="font-semibold">{formatDateTime(demand.createdat)}</span></span>
-                                            {demand.deadlinedate && <span>مهلت تحویل: <span className="font-semibold">{formatDateTime(demand.deadlinedate, false)}</span></span>}
-                                            {demand.totalValue > 0 && 
-                                                <div className="flex items-center gap-1">
-                                                    <span className="font-semibold">ارزش کل تامین:</span>
-                                                    <span className="font-semibold font-mono text-green-700 dark:text-green-400">{formatCurrency(demand.totalValue)}</span>
-                                                </div>
-                                            }
+                                        <div className="flex items-center">
+                                            <input type="checkbox" id="awaitingCustomerFilter" checked={awaitingCustomerFilter} onChange={e => setAwaitingCustomerFilter(e.target.checked)} className="ml-2 h-4 w-4 rounded text-indigo-600 border-gray-300 focus:ring-indigo-500" />
+                                            <label htmlFor="awaitingCustomerFilter" className="text-sm font-medium whitespace-nowrap">کالا تامین شد (منتظر مشتری)</label>
                                         </div>
                                     </div>
-                                    <div className="flex items-center gap-2 self-end sm:self-center">
-                                        {demand.is_emergency && <span className="px-2 py-1 text-xs rounded-full bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200 font-semibold" title="فوری">فوری</span>}
-                                        <span className={`px-2 py-1 text-xs rounded-full font-semibold ${demand.status === 'fulfilled' ? 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200' : demand.status === 'cancelled' ? 'bg-gray-200 text-gray-800 dark:bg-gray-600 dark:text-gray-200' : 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'}`}>
-                                            {demand.status === 'fulfilled' ? 'تکمیل شده' : demand.status === 'cancelled' ? 'لغو شده' : 'باز'}
-                                        </span>
-                                        <button onClick={() => handleOpenManageItemsModal(demand)} className="text-gray-400 hover:text-indigo-500 dark:hover:text-indigo-400 p-1 rounded-full transition-colors" title="مدیریت اقلام">
-                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                                                <path d="M17.414 2.586a2 2 0 00-2.828 0L7 10.172V13h2.828l7.586-7.586a2 2 0 000-2.828z" />
-                                                <path fillRule="evenodd" d="M2 6a2 2 0 012-2h4a1 1 0 010 2H4v10h10v-4a1 1 0 112 0v4a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" clipRule="evenodd" />
-                                            </svg>
-                                        </button>
-                                        <button onClick={() => handleDeleteDemand(demand.id)} className="text-gray-400 hover:text-red-500 dark:hover:text-red-400 p-1 rounded-full transition-colors" title="حذف تقاضا">
-                                             <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm4 0a1 1 0 012 0v6a1 1 0 11-2 0V8z" clipRule="evenodd" /></svg>
-                                        </button>
-                                    </div>
-                                </header>
-                                
-                                {/* Demand Items (Desktop Table View - md:block and up) */}
-                                <div className="overflow-x-auto hidden md:block">
-                                    <table className="min-w-full text-sm text-right divide-y divide-gray-200 dark:divide-gray-700">
-                                        <thead className="bg-gray-50 dark:bg-gray-700/50 text-xs text-gray-600 dark:text-gray-300 uppercase">
-                                            <tr>
-                                                <th className="p-3 text-right">محصول</th>
-                                                <th className="p-3 text-right">تعداد درخواستی</th>
-                                                <th className="p-3 text-right">قیمت تامین</th>
-                                                <th className="p-3 text-right">تعداد تامین</th>
-                                                <th className="p-3 text-right">وضعیت آیتم</th>
-                                                <th className="p-3 text-right">عملیات</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-                                        {demand.demand_item.map((item, itemIndex) => (
-                                            <React.Fragment key={item.id}>
-                                                <tr className="hover:bg-gray-50 dark:hover:bg-gray-700/20">
-                                                    <td className="p-3 font-semibold text-gray-800 dark:text-gray-100">{item.product ? `${item.product.brand ? item.product.brand.title + ' ' : ''}${item.product.title}`: 'محصول حذف شده'}</td>
-                                                    <td className="p-3">{item.quantity}</td>
-                                                    <td className="p-3 font-mono">{formatCurrency(item.approved_supply_price)}</td>
-                                                    <td className="p-3">{item.approved_supply_quantity || '-'}</td>
-                                                    <td className="p-3"><span className="px-2 py-1 text-xs rounded-full whitespace-nowrap" style={{ backgroundColor: item.demandstatustype?.color_bg || '#E5E7EB', color: item.demandstatustype?.color_text || '#1F2937' }}>{item.demandstatustype?.title_farsi || 'ثبت شده'}</span></td>
-                                                    <td className="p-3"><button onClick={() => handleOpenEditItemModal(item, demand)} className="text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 hover:underline text-xs font-semibold">ویرایش</button></td>
-                                                </tr>
-                                                {(item.demand_admin_note || item.supply_admin_note) && (
-                                                    <tr className="bg-gray-50 dark:bg-gray-900/20">
-                                                        <td colSpan="6" className="px-4 py-2 text-xs text-gray-600 dark:text-gray-400">
-                                                            {item.demand_admin_note && <div><strong>یادداشت مدیر تقاضا:</strong> {item.demand_admin_note}</div>}
-                                                            {item.supply_admin_note && <div className="mt-1"><strong>یادداشت مدیر تامین:</strong> {item.supply_admin_note}</div>}
-                                                        </td>
-                                                    </tr>
-                                                )}
-                                            </React.Fragment>
-                                        ))}
-                                        </tbody>
-                                    </table>
                                 </div>
-                                
-                                {/* Demand Items (Mobile Card View - default/md:hidden) */}
-                                <div className="md:hidden p-3 space-y-3">
-                                    {demand.demand_item.map((item, itemIndex) => (
-                                        <div key={item.id} className="p-3 border border-gray-200 dark:border-gray-700 rounded-lg bg-gray-50 dark:bg-gray-700/50 space-y-2">
-                                            <div className="flex justify-between items-start border-b pb-2 mb-2 border-gray-200 dark:border-gray-600">
-                                                <div className="font-bold text-sm text-indigo-700 dark:text-indigo-400">
-                                                    {item.product ? `${item.product.brand ? item.product.brand.title + ' ' : ''}${item.product.title}`: 'محصول حذف شده'}
+                                <div className="text-xs text-gray-500 dark:text-gray-400 mt-3 border-t border-gray-200 dark:border-gray-700 pt-2">
+                                    {filteredDemands.length} مورد یافت شد.
+                                </div>
+                            </div>
+
+                            {isLoading && <div className="spinner"></div>}
+                            {error && <p className="text-center text-red-500 bg-red-100 dark:bg-red-900/50 p-4 rounded-lg">{error}</p>}
+
+                            {!isLoading && (
+                                <div className="space-y-4">
+                                {filteredDemands.map(demand => (
+                                    <div key={demand.id} className="bg-white dark:bg-gray-800 rounded-lg shadow transition-all hover:shadow-xl border border-gray-100 dark:border-gray-700">
+                                        <header className="p-3 sm:p-4 border-b border-gray-200 dark:border-gray-700 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+                                            <div className="flex-1">
+                                                <div className="flex items-center gap-2">
+                                                    <h2 className="font-bold text-lg text-indigo-700 dark:text-indigo-400">{demand.profiles.fullname}</h2>
+                                                    {demand.location?.city?.title && (
+                                                        <span className="text-sm text-gray-500 dark:text-gray-400">({demand.location.city.title})</span>
+                                                    )}
                                                 </div>
-                                                <button onClick={() => handleOpenEditItemModal(item, demand)} className="text-indigo-600 dark:text-indigo-400 hover:underline text-xs font-semibold px-2 py-1 rounded-md bg-indigo-100 dark:bg-indigo-900/50">
-                                                    ویرایش
+                                                <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                                    <span>شناسه: <span className="font-mono">{demand.id}</span></span>
+                                                    <span>تاریخ ثبت: <span className="font-semibold">{formatDateTime(demand.createdat)}</span></span>
+                                                    {demand.deadlinedate && <span>مهلت تحویل: <span className="font-semibold">{formatDateTime(demand.deadlinedate, false)}</span></span>}
+                                                    {demand.totalValue > 0 && 
+                                                        <div className="flex items-center gap-1">
+                                                            <span className="font-semibold">ارزش کل تامین:</span>
+                                                            <span className="font-semibold font-mono text-green-700 dark:text-green-400">{formatCurrency(demand.totalValue)}</span>
+                                                        </div>
+                                                    }
+                                                </div>
+                                            </div>
+                                            <div className="flex items-center gap-2 self-end sm:self-center">
+                                                {demand.is_emergency && <span className="px-2 py-1 text-xs rounded-full bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200 font-semibold" title="فوری">فوری</span>}
+                                                <span className={`px-2 py-1 text-xs rounded-full font-semibold ${demand.status === 'fulfilled' ? 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200' : demand.status === 'cancelled' ? 'bg-gray-200 text-gray-800 dark:bg-gray-600 dark:text-gray-200' : 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'}`}>
+                                                    {demand.status === 'fulfilled' ? 'تکمیل شده' : demand.status === 'cancelled' ? 'لغو شده' : 'باز'}
+                                                </span>
+                                                <button onClick={() => handleOpenManageItemsModal(demand)} className="text-gray-400 hover:text-indigo-500 dark:hover:text-indigo-400 p-1 rounded-full transition-colors" title="مدیریت اقلام">
+                                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                                                        <path d="M17.414 2.586a2 2 0 00-2.828 0L7 10.172V13h2.828l7.586-7.586a2 2 0 000-2.828z" />
+                                                        <path fillRule="evenodd" d="M2 6a2 2 0 012-2h4a1 1 0 010 2H4v10h10v-4a1 1 0 112 0v4a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" clipRule="evenodd" />
+                                                    </svg>
+                                                </button>
+                                                <button onClick={() => handleDeleteDemand(demand.id)} className="text-gray-400 hover:text-red-500 dark:hover:text-red-400 p-1 rounded-full transition-colors" title="حذف تقاضا">
+                                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm4 0a1 1 0 012 0v6a1 1 0 11-2 0V8z" clipRule="evenodd" /></svg>
                                                 </button>
                                             </div>
-                                            
-                                            <div className="grid grid-cols-2 gap-3 text-xs">
-                                                <div className="flex justify-between">
-                                                    <span className="text-gray-500 dark:text-gray-400">تعداد درخواستی:</span>
-                                                    <span className="font-semibold text-gray-800 dark:text-gray-200">{item.quantity}</span>
+                                        </header>
+                                        
+                                        {/* Demand Items (Desktop Table View - md:block and up) */}
+                                        <div className="overflow-x-auto hidden md:block">
+                                            <table className="min-w-full text-sm text-right divide-y divide-gray-200 dark:divide-gray-700">
+                                                <thead className="bg-gray-50 dark:bg-gray-700/50 text-xs text-gray-600 dark:text-gray-300 uppercase">
+                                                    <tr>
+                                                        <th className="p-3 text-right">محصول</th>
+                                                        <th className="p-3 text-right">تعداد درخواستی</th>
+                                                        <th className="p-3 text-right">قیمت تامین</th>
+                                                        <th className="p-3 text-right">تعداد تامین</th>
+                                                        <th className="p-3 text-right">وضعیت آیتم</th>
+                                                        <th className="p-3 text-right">عملیات</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+                                                {demand.demand_item.map((item, itemIndex) => (
+                                                    <React.Fragment key={item.id}>
+                                                        <tr className="hover:bg-gray-50 dark:hover:bg-gray-700/20">
+                                                            <td className="p-3 font-semibold text-gray-800 dark:text-gray-100">{item.product ? `${item.product.brand ? item.product.brand.title + ' ' : ''}${item.product.title}`: 'محصول حذف شده'}</td>
+                                                            <td className="p-3">{item.quantity}</td>
+                                                            <td className="p-3 font-mono">{formatCurrency(item.approved_supply_price)}</td>
+                                                            <td className="p-3">{item.approved_supply_quantity || '-'}</td>
+                                                            <td className="p-3"><span className="px-2 py-1 text-xs rounded-full whitespace-nowrap" style={{ backgroundColor: item.demandstatustype?.color_bg || '#E5E7EB', color: item.demandstatustype?.color_text || '#1F2937' }}>{item.demandstatustype?.title_farsi || 'ثبت شده'}</span></td>
+                                                            <td className="p-3"><button onClick={() => handleOpenEditItemModal(item, demand)} className="text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 hover:underline text-xs font-semibold">ویرایش</button></td>
+                                                        </tr>
+                                                        {(item.demand_admin_note || item.supply_admin_note) && (
+                                                            <tr className="bg-gray-50 dark:bg-gray-900/20">
+                                                                <td colSpan="6" className="px-4 py-2 text-xs text-gray-600 dark:text-gray-400">
+                                                                    {item.demand_admin_note && <div><strong>یادداشت مدیر تقاضا:</strong> {item.demand_admin_note}</div>}
+                                                                    {item.supply_admin_note && <div className="mt-1"><strong>یادداشت مدیر تامین:</strong> {item.supply_admin_note}</div>}
+                                                                </td>
+                                                            </tr>
+                                                        )}
+                                                    </React.Fragment>
+                                                ))}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                        
+                                        {/* Demand Items (Mobile Card View - default/md:hidden) */}
+                                        <div className="md:hidden p-3 space-y-3">
+                                            {demand.demand_item.map((item, itemIndex) => (
+                                                <div key={item.id} className="p-3 border border-gray-200 dark:border-gray-700 rounded-lg bg-gray-50 dark:bg-gray-700/50 space-y-2">
+                                                    <div className="flex justify-between items-start border-b pb-2 mb-2 border-gray-200 dark:border-gray-600">
+                                                        <div className="font-bold text-sm text-indigo-700 dark:text-indigo-400">
+                                                            {item.product ? `${item.product.brand ? item.product.brand.title + ' ' : ''}${item.product.title}`: 'محصول حذف شده'}
+                                                        </div>
+                                                        <button onClick={() => handleOpenEditItemModal(item, demand)} className="text-indigo-600 dark:text-indigo-400 hover:underline text-xs font-semibold px-2 py-1 rounded-md bg-indigo-100 dark:bg-indigo-900/50">
+                                                            ویرایش
+                                                        </button>
+                                                    </div>
+                                                    
+                                                    <div className="grid grid-cols-2 gap-3 text-xs">
+                                                        <div className="flex justify-between">
+                                                            <span className="text-gray-500 dark:text-gray-400">تعداد درخواستی:</span>
+                                                            <span className="font-semibold text-gray-800 dark:text-gray-200">{item.quantity}</span>
+                                                        </div>
+                                                        <div className="flex justify-between">
+                                                            <span className="text-gray-500 dark:text-gray-400">تعداد تامین:</span>
+                                                            <span className="font-semibold text-gray-800 dark:text-gray-200">{item.approved_supply_quantity || '-'}</span>
+                                                        </div>
+                                                        <div className="flex justify-between col-span-2">
+                                                            <span className="text-gray-500 dark:text-gray-400">قیمت تامین:</span>
+                                                            <span className="font-mono text-green-600 dark:text-green-400">{formatCurrency(item.approved_supply_price)}</span>
+                                                        </div>
+                                                    </div>
+
+                                                    <div className="pt-2 border-t border-gray-200 dark:border-gray-600 mt-2">
+                                                        <div className="text-right mb-2">
+                                                            <span className="px-2 py-1 text-xs rounded-full whitespace-nowrap font-medium" style={{ backgroundColor: item.demandstatustype?.color_bg || '#E5E7EB', color: item.demandstatustype?.color_text || '#1F2937' }}>
+                                                                {item.demandstatustype?.title_farsi || 'ثبت شده'}
+                                                            </span>
+                                                        </div>
+                                                        {(item.demand_admin_note || item.supply_admin_note) && (
+                                                            <div className="mt-2 text-xs text-gray-600 dark:text-gray-400 space-y-1">
+                                                                {item.demand_admin_note && <div><strong>مدیر تقاضا:</strong> {item.demand_admin_note}</div>}
+                                                                {item.supply_admin_note && <div><strong>مدیر تامین:</strong> {item.supply_admin_note}</div>}
+                                                            </div>
+                                                        )}
+                                                    </div>
                                                 </div>
-                                                <div className="flex justify-between">
-                                                    <span className="text-gray-500 dark:text-gray-400">تعداد تامین:</span>
-                                                    <span className="font-semibold text-gray-800 dark:text-gray-200">{item.approved_supply_quantity || '-'}</span>
+                                            ))}
+                                        </div>
+                                    </div>
+                                ))}
+                                </div>
+                            )}
+                        </>
+                    )}
+
+                    {/* Content for Retargeting */}
+                    {activeTab === 'retargeting' && (
+                        <div className="space-y-6">
+                            <div className="bg-yellow-50 dark:bg-yellow-900/30 p-4 rounded-lg border border-yellow-200 dark:border-yellow-700 text-sm mb-4">
+                                <p className="font-semibold text-yellow-800 dark:text-yellow-200 flex items-center gap-2">
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                                    فرصت‌های بازاریابی مجدد
+                                </p>
+                                <p className="mt-1 text-yellow-700 dark:text-yellow-300">
+                                    لیست زیر شامل کالاهای لغو شده‌ای است که هم‌اکنون توسط تامین‌کنندگان موجود شده‌اند. شما می‌توانید مجدداً با مشتری تماس گرفته و این کالاها را پیشنهاد دهید.
+                                </p>
+                            </div>
+
+                            {/* Filters for Retargeting */}
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 items-end mb-6 bg-white dark:bg-gray-800 p-4 rounded-lg shadow">
+                                <div className="lg:col-span-2 relative">
+                                    <label className="text-sm font-medium text-gray-600 dark:text-gray-300 mb-1 block">جستجو</label>
+                                    <input type="text" placeholder="جستجوی مشتری، محصول..." value={retargetingSearchTerm} onChange={e => setRetargetingSearchTerm(e.target.value)} className="w-full p-2 bg-gray-100 dark:bg-gray-700 border border-transparent focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 rounded-lg" />
+                                    {retargetingSearchTerm && (
+                                        <button onClick={() => setRetargetingSearchTerm('')} className="absolute left-2 bottom-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200">
+                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" /></svg>
+                                        </button>
+                                    )}
+                                </div>
+                                <div>
+                                    <label className="text-sm font-medium text-gray-600 dark:text-gray-300 mb-1 block">زمان موجود شدن</label>
+                                    <select value={retargetingTimeFilter} onChange={e => setRetargetingTimeFilter(e.target.value)} className="w-full p-2 bg-gray-100 dark:bg-gray-700 border border-transparent focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 rounded-lg">
+                                        <option value="all">همه زمان‌ها</option>
+                                        <option value="7days">۷ روز گذشته</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="text-sm font-medium text-gray-600 dark:text-gray-300 mb-1 block">زمان لغو تقاضا</label>
+                                    <select value={retargetingCancellationFilter} onChange={e => setRetargetingCancellationFilter(e.target.value)} className="w-full p-2 bg-gray-100 dark:bg-gray-700 border border-transparent focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 rounded-lg">
+                                        <option value="all">همه زمان‌ها</option>
+                                        <option value="3">۳ روز گذشته</option>
+                                        <option value="7">۷ روز گذشته</option>
+                                        <option value="14">۱۴ روز گذشته</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            {isRetargetingLoading ? (
+                                <div className="spinner"></div>
+                            ) : filteredRetargetingItems.length === 0 ? (
+                                <div className="text-center py-12 bg-white dark:bg-gray-800 rounded-lg shadow">
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                                    <h3 className="mt-2 text-sm font-medium text-gray-900 dark:text-white">فرصت جدیدی یافت نشد</h3>
+                                    <p className="mt-1 text-sm text-gray-500">
+                                        {retargetingSearchTerm || retargetingTimeFilter !== 'all' || retargetingCancellationFilter !== 'all' ? 'با توجه به فیلترهای اعمال شده، موردی یافت نشد.' : 'هیچ کالای لغو شده‌ای در حال حاضر توسط تامین‌کنندگان موجود نیست.'}
+                                    </p>
+                                </div>
+                            ) : (
+                                <div className="grid grid-cols-1 gap-6">
+                                    {filteredRetargetingItems.map(item => (
+                                        <div key={item.id} className="bg-white dark:bg-gray-800 rounded-lg shadow border border-gray-200 dark:border-gray-700 overflow-hidden">
+                                            <div className="p-4 border-b border-gray-200 dark:border-gray-700 flex flex-col md:flex-row justify-between gap-4 bg-gray-50 dark:bg-gray-900/50">
+                                                <div>
+                                                    <h3 className="text-lg font-bold text-indigo-700 dark:text-indigo-400 mb-1">
+                                                        {item.product?.brand?.title} {item.product?.title}
+                                                    </h3>
+                                                    <div className="text-sm text-gray-500 dark:text-gray-400 flex flex-wrap gap-x-4 gap-y-1">
+                                                        <span>مشتری: <span className="font-semibold text-gray-800 dark:text-gray-200">{item.customer?.fullname}</span> ({item.customer?.mobile})</span>
+                                                        <span>شهر: {item.location?.city?.title || '-'}</span>
+                                                    </div>
                                                 </div>
-                                                <div className="flex justify-between col-span-2">
-                                                    <span className="text-gray-500 dark:text-gray-400">قیمت تامین:</span>
-                                                    <span className="font-mono text-green-600 dark:text-green-400">{formatCurrency(item.approved_supply_price)}</span>
+                                                <div className="text-right md:text-left text-sm">
+                                                    <div className="text-red-600 dark:text-red-400 font-semibold mb-1">لغو شده: {timeAgo(item.demandDate)}</div>
+                                                    <div className="text-gray-500 dark:text-gray-400">تعداد اولیه: <span className="font-mono">{item.quantity}</span></div>
                                                 </div>
                                             </div>
-
-                                            <div className="pt-2 border-t border-gray-200 dark:border-gray-600 mt-2">
-                                                <div className="text-right mb-2">
-                                                    <span className="px-2 py-1 text-xs rounded-full whitespace-nowrap font-medium" style={{ backgroundColor: item.demandstatustype?.color_bg || '#E5E7EB', color: item.demandstatustype?.color_text || '#1F2937' }}>
-                                                        {item.demandstatustype?.title_farsi || 'ثبت شده'}
-                                                    </span>
+                                            
+                                            <div className="p-4">
+                                                <h4 className="text-sm font-bold text-gray-700 dark:text-gray-300 mb-3 border-b border-gray-100 dark:border-gray-700 pb-2">تامین‌کنندگان دارای موجودی:</h4>
+                                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                                                    {item.availableSuppliers.map((supplier, idx) => (
+                                                        <div key={idx} className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded p-3 flex justify-between items-center">
+                                                            <div>
+                                                                <div className="font-semibold text-gray-800 dark:text-gray-200 text-sm">{supplier.profiles?.fullname}</div>
+                                                                <div className="text-xs text-gray-500 mt-1">{timeAgo(supplier.lastupdatedat)} بروز شده</div>
+                                                            </div>
+                                                            <div className="text-left">
+                                                                <div className="font-bold text-green-700 dark:text-green-400 font-mono text-sm">{formatCurrency(supplier.unitprice)}</div>
+                                                            </div>
+                                                        </div>
+                                                    ))}
                                                 </div>
-                                                {(item.demand_admin_note || item.supply_admin_note) && (
-                                                    <div className="mt-2 text-xs text-gray-600 dark:text-gray-400 space-y-1">
-                                                        {item.demand_admin_note && <div><strong>مدیر تقاضا:</strong> {item.demand_admin_note}</div>}
-                                                        {item.supply_admin_note && <div><strong>مدیر تامین:</strong> {item.supply_admin_note}</div>}
-                                                    </div>
-                                                )}
+                                                <div className="mt-4 pt-3 border-t border-gray-200 dark:border-gray-700 flex justify-end gap-3">
+                                                    <button 
+                                                        onClick={() => addToast(`اطلاعات تماس ${item.customer?.fullname} کپی شد`, 'success')}
+                                                        className="text-gray-600 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200 text-sm font-semibold flex items-center gap-1 bg-gray-100 dark:bg-gray-700 px-3 py-2 rounded-lg"
+                                                    >
+                                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" /></svg>
+                                                        تماس با مشتری
+                                                    </button>
+                                                    <button 
+                                                        onClick={() => handleReissueDemand(item)}
+                                                        className="bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold flex items-center gap-1 px-3 py-2 rounded-lg"
+                                                    >
+                                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                                                        صدور مجدد تقاضا
+                                                    </button>
+                                                </div>
                                             </div>
                                         </div>
                                     ))}
                                 </div>
-                            </div>
-                        ))}
-                        </div>
-                    )}
-                    
-                    {!isLoading && filteredDemands.length === 0 && (
-                        <div className="text-center py-12">
-                            <svg xmlns="http://www.w3.org/2000/svg" className="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-                            <h3 className="mt-2 text-sm font-medium text-gray-900 dark:text-white">هیچ تقاضایی یافت نشد</h3>
-                            <p className="mt-1 text-sm text-gray-500">با توجه به فیلترهای اعمال شده، موردی برای نمایش وجود ندارد.</p>
+                            )}
                         </div>
                     )}
 
@@ -1403,7 +1857,7 @@
              }, [theme]);
 
              const toggleTheme = () => {
-                 setTheme(prev => prev === 'light' ? 'dark' : 'light');
+                  setTheme(prev => prev === 'light' ? 'dark' : 'light');
              };
 
              return (
