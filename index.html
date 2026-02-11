@@ -14,7 +14,7 @@
                     fontFamily: {
                         vazir: ['Vazirmatn', 'sans-serif'],
                     },
-                      keyframes: {
+                     keyframes: {
                         'toast-in': {
                           'from': { transform: 'translateX(100%)', opacity: '0' },
                           'to': { transform: 'translateX(0)', opacity: '1' },
@@ -107,6 +107,14 @@
         const formatCurrency = (value) => {
             if (value === null || typeof value === 'undefined' || isNaN(value)) return '-';
             return `${Number(value).toLocaleString('fa-IR')} تومان`;
+        };
+
+        const formatSafeNumber = (val) => {
+            if (!val) return '۰';
+            // Remove commas or other non-numeric chars if stored as text
+            const cleanVal = String(val).replace(/,/g, '');
+            const num = Number(cleanVal);
+            return isNaN(num) ? 'خطا' : num.toLocaleString('fa-IR');
         };
         
         const formatDateTime = (dateString, includeTime = true) => {
@@ -1115,6 +1123,9 @@
             const [defaultStatusId, setDefaultStatusId] = React.useState(null);
             const [confirmState, setConfirmState] = React.useState({ isOpen: false, onConfirm: null, message: '', title: '' });
 
+            // Currency State
+            const [currency, setCurrency] = React.useState(null);
+
             const [countdown, setCountdown] = React.useState(300); // 5 minutes in seconds
             const [searchTerm, setSearchTerm] = React.useState('');
             const [statusFilter, setStatusFilter] = React.useState('open'); // Changed default from 'all' to 'open'
@@ -1148,6 +1159,25 @@
                 } while (productsLastFetch.length === pageSize);
 
                 return allProducts;
+            };
+
+            const fetchCurrencies = async () => {
+                try {
+                    const { data, error } = await supabaseClient
+                        .from('irancurrency')
+                        .select('*')
+                        .order('created_at', { ascending: false })
+                        .limit(1)
+                        .single();
+                    
+                    if (error) {
+                        if (error.code !== 'PGRST116') console.error("Error fetching currencies:", error);
+                    } else {
+                        setCurrency(data);
+                    }
+                } catch (e) {
+                    console.error("Currency fetch exception:", e);
+                }
             };
 
             const fetchData = async (isAutoRefresh = false) => {
@@ -1215,6 +1245,9 @@
                         console.warn("Default status 'در انتظار تامین' not found. Falling back to first available status.");
                         setDefaultStatusId(statusesRes.data?.[0]?.id || null);
                     }
+
+                    // Fetch currencies
+                    fetchCurrencies();
 
                 } catch (err)
                 {
@@ -1523,7 +1556,28 @@
             return (
                 <div className="p-4 sm:p-6 lg:p-8">
                     <header className="flex flex-col sm:flex-row justify-between items-center mb-6 gap-4">
-                        <h1 className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white">مدیریت تقاضاها</h1>
+                        <div className="flex flex-col sm:flex-row items-center gap-4">
+                            <h1 className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white">مدیریت تقاضاها</h1>
+                            
+                            {/* Currency Display */}
+                            {currency && (
+                                <div className="hidden lg:flex items-center gap-6 text-[10px] sm:text-xs border-r border-gray-300 dark:border-gray-600 pr-4 mr-4">
+                                    <div className="flex flex-col items-center">
+                                        <span className="text-gray-500 mb-0.5">دلار</span>
+                                        <span className="font-bold text-green-600 dark:text-green-400 font-mono">{formatSafeNumber(currency.dollar)}</span>
+                                    </div>
+                                    <div className="flex flex-col items-center">
+                                        <span className="text-gray-500 mb-0.5">درهم</span>
+                                        <span className="font-bold text-blue-600 dark:text-blue-400 font-mono">{formatSafeNumber(currency.dirham)}</span>
+                                    </div>
+                                    <div className="flex flex-col items-center">
+                                        <span className="text-gray-500 mb-0.5">یوآن</span>
+                                        <span className="font-bold text-red-600 dark:text-red-400 font-mono">{formatSafeNumber(currency.yuan)}</span>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+
                         <div className="flex items-center gap-4">
                             <span className="font-mono text-lg text-gray-700 dark:text-gray-300" dir="ltr" title="زمان تا به‌روزرسانی بعدی">
                                 {formatCountdown(countdown)}
