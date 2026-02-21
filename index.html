@@ -92,13 +92,7 @@
         const supabaseUrl = typeof __supabase_url !== 'undefined' ? __supabase_url : 'https://wehyjatotbzxargnxasg.supabase.co';
         const supabaseKey = typeof __supabase_anon_key !== 'undefined' ? __supabase_anon_key : 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndlaHlqYXRvdGJ6eGFyZ254YXNnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTE5MTIwMjEsImV4cCI6MjA2NzQ4ODAyMX0.2R448DuEBlTrNvaYXiYZ8D5M7MJNv7n1qmIDHQBNFiY';
 
-        const supabaseClient = createClient(supabaseUrl, supabaseKey, {
-            global: {
-                fetch: (url, options) => {
-                    return window.fetch(url, options);
-                }
-            }
-        });
+        const supabaseClient = createClient(supabaseUrl, supabaseKey);
 
 
         // ==================================================
@@ -535,18 +529,7 @@
                 setIsFetchingAssignments(true);
                 const { data, error } = await supabaseClient
                     .from('supplier_demand_assignment')
-                    .select(`
-                        id,
-                        assigned_quantity,
-                        assigned_price,
-                        supplieruserid,
-                        profiles:supplieruserid (fullname, mobile),
-                        location:locationid (
-                            id,
-                            address,
-                            city (title, province(title))
-                        )
-                    `)
+                    .select('id, assigned_quantity, assigned_price, supplieruserid, profiles:supplieruserid(fullname, mobile), location:locationid(id, address, city(title, province(title)))')
                     .eq('demand_item_id', itemToEdit.id);
 
                 if (error) {
@@ -647,6 +630,23 @@
                     if (error) throw error;
 
                     await fetchAssignedSuppliers();
+                    
+                    // Auto-fill the approved quantity and price in the form
+                    setFormData(prev => ({
+                        ...prev,
+                        approved_supply_quantity: Number(newAssignment.quantity),
+                        approved_supply_price: Number(newAssignment.price)
+                    }));
+
+                    // Auto-change status if it was "در انتظار تامین"
+                    const currentStatus = demandStatuses.find(s => s.id === statusId);
+                    if (currentStatus && currentStatus.title_farsi === 'در انتظار تامین') {
+                        const targetStatus = demandStatuses.find(s => s.title_farsi === 'کالا تامین شد و منتظر تصمیم مشتری هست');
+                        if (targetStatus) {
+                            setStatusId(targetStatus.id);
+                        }
+                    }
+
                     setNewAssignment({ supplierId: '', locationId: '', price: '', quantity: '' });
                     setSupplierLocations([]);
                     addToast("تامین‌کننده با موفقیت تخصیص یافت.", "success");
@@ -1203,12 +1203,7 @@
                 try {
                     const { data: demandData, error: demandError } = await supabaseClient
                         .from('demand')
-                        .select(`
-                            id, createdat, deadlinedate, is_emergency,
-                            profiles (id, fullname, mobile),
-                            location (*, city(*, province(*))),
-                            demand_item ( id, quantity, approved_supply_price, approved_supply_quantity, demand_admin_note, supply_admin_note, demandstatusid, productid, product ( id, title, brand(*), productproperty(*, propertykey(*)) ), demandstatustype(*) )
-                        `)
+                        .select('id, createdat, deadlinedate, is_emergency, profiles(id, fullname, mobile), location(*, city(*, province(*))), demand_item(id, quantity, approved_supply_price, approved_supply_quantity, demand_admin_note, supply_admin_note, demandstatusid, productid, product(id, title, brand(*), productproperty(*, propertykey(*))), demandstatustype(*))')
                         .order('createdat', { ascending: false });
                     if (demandError) throw demandError;
                     
@@ -1327,13 +1322,7 @@
                     // If productIds is huge, active chunking might be needed, but OK for now.
                     const { data: stock, error } = await supabaseClient
                         .from('supplierstock')
-                        .select(`
-                            productid, 
-                            unitprice, 
-                            lastupdatedat, 
-                            supplieruserid,
-                            profiles:supplieruserid (fullname, mobile)
-                        `)
+                        .select('productid, unitprice, lastupdatedat, supplieruserid, profiles:supplieruserid(fullname, mobile)')
                         .in('productid', productIds);
                         
                     if (error) throw error;
