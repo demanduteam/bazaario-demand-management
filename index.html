@@ -53,7 +53,6 @@
             display: flex;
             align-items: center;
             justify-content: center;
-            z-index: 100;
         }
         .modal-content {
             padding: 1.5rem;
@@ -143,14 +142,14 @@
             return `${days} روز پیش`;
         };
 
-        const Modal = ({ isOpen, onClose, title, children }) => {
+        const Modal = ({ isOpen, onClose, title, children, zIndex }) => {
             if (!isOpen) return null;
             React.useEffect(() => {
                 document.body.style.overflow = 'hidden';
                 return () => { document.body.style.overflow = 'unset'; };
             }, [isOpen]);
             return (
-                <div className="modal-overlay" onClick={onClose}>
+                <div className="modal-overlay" style={{ zIndex: zIndex || 100 }} onClick={onClose}>
                     <div className="modal-content bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100" onClick={e => e.stopPropagation()}>
                         <div className="flex justify-between items-center mb-4 pb-3 border-b border-gray-200 dark:border-gray-600">
                             <h2 className="text-xl font-bold">{title}</h2>
@@ -165,7 +164,7 @@
         const ConfirmModal = ({ isOpen, onClose, onConfirm, title, message }) => {
             if (!isOpen) return null;
             return (
-                <Modal isOpen={isOpen} onClose={onClose} title={title}>
+                <Modal isOpen={isOpen} onClose={onClose} title={title} zIndex={120}>
                     <p className="text-gray-600 dark:text-gray-300 mb-6">{message}</p>
                     <div className="flex flex-col sm:flex-row justify-end gap-3">
                         <button type="button" onClick={onClose} className="w-full sm:w-auto bg-gray-200 dark:bg-gray-600 hover:bg-gray-300 dark:hover:bg-gray-700 text-gray-800 dark:text-white font-bold py-2 px-4 rounded-lg">لغو</button>
@@ -239,7 +238,162 @@
             );
         };
 
-        const DemandFormModal = ({ isOpen, onClose, onSave, customers, products, defaultStatusId }) => {
+        const QuickUserFormModal = ({ isOpen, onClose, onSuccess, customerRoleId, marketingChannels, provinces }) => {
+            const [formData, setFormData] = React.useState({ mobile: '', prefix: '', firstname: '', fullname: '', emergencyphonenumber: '', marketingchannelid: '', provinceid: '', cityid: '' });
+            const [cities, setCities] = React.useState([]);
+            const [isLoadingCities, setIsLoadingCities] = React.useState(false);
+            const [isLoading, setIsLoading] = React.useState(false);
+            const [error, setError] = React.useState('');
+
+            React.useEffect(() => {
+                const fetchCities = async () => {
+                    if (formData.provinceid) {
+                        setIsLoadingCities(true);
+                        const { data } = await supabaseClient.from('city').select('*').eq('provinceid', formData.provinceid).order('title');
+                        setCities(data || []);
+                        setIsLoadingCities(false);
+                    } else {
+                        setCities([]);
+                    }
+                };
+                fetchCities();
+            }, [formData.provinceid]);
+
+            const handleChange = (e) => {
+                const { name, value } = e.target;
+                setFormData(prev => ({ ...prev, [name]: value }));
+            };
+            
+            const handleSubmit = async (e) => {
+                e.preventDefault();
+                setError('');
+                setIsLoading(true);
+                try {
+                    const password = formData.mobile.slice(-6);
+                    if (password.length < 6) throw new Error('شماره موبایل باید معتبر باشد (حداقل ۶ رقم).');
+                    
+                    // بررسی اینکه آیا شماره موبایل از قبل در سیستم وجود دارد یا خیر (جلوگیری از ایجاد کاربر تکراری)
+                    const { data: existingProfiles, error: searchError } = await supabaseClient
+                        .from('profiles')
+                        .select('fullname, role:roleid(title)')
+                        .eq('mobile', formData.mobile);
+                        
+                    if (searchError) throw new Error('خطا در بررسی شماره موبایل.');
+                    if (existingProfiles && existingProfiles.length > 0) {
+                        const existing = existingProfiles[0];
+                        const roleName = existing.role?.title || 'نامشخص';
+                        throw new Error(`این شماره موبایل قبلاً برای کاربر "${existing.fullname}" با نقش "${roleName}" ثبت شده است. لطفاً او را مستقیماً از منوی جستجو انتخاب کنید.`);
+                    }
+
+                    const email = `${formData.mobile}@placeholder.email`;
+                    
+                    const { data: authData, error: authError } = await supabaseClient.auth.signUp({ email, password });
+                    if (authError) throw new Error(authError.message.includes("User already registered") ? "کاربری با این شماره موبایل قبلا ثبت‌نام کرده است." : "خطا در ایجاد کاربر.");
+                    
+                    if (authData.user) {
+                        const profileData = {
+                            fullname: formData.fullname,
+                            firstname: formData.firstname || null,
+                            prefix: formData.prefix || null,
+                            mobile: formData.mobile,
+                            emergencyphonenumber: formData.emergencyphonenumber || null,
+                            roleid: customerRoleId,
+                            marketingchannelid: formData.marketingchannelid || null,
+                        };
+                        const { error: profileError } = await supabaseClient.from('profiles').update(profileData).eq('id', authData.user.id);
+                        if (profileError) throw profileError;
+
+                        if (formData.cityid || formData.provinceid) {
+                            const { data: locData, error: locError } = await supabaseClient.from('location').insert({
+                                title: `آدرس پایه ${formData.fullname}`,
+                                provinceid: formData.provinceid || null,
+                                cityid: formData.cityid || null
+                            }).select().single();
+                            if (!locError && locData) {
+                                await supabaseClient.from('userlocation').insert({ userid: authData.user.id, locationid: locData.id });
+                            }
+                        }
+                        onSuccess({ id: authData.user.id, fullname: formData.fullname, mobile: formData.mobile });
+                    }
+                } catch (err) {
+                    setError(err.message);
+                } finally {
+                    setIsLoading(false);
+                }
+            };
+
+            return (
+                <Modal isOpen={isOpen} onClose={onClose} title="ثبت سریع مشتری جدید" zIndex={110}>
+                    <form onSubmit={handleSubmit} className="space-y-4">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <label className="block text-sm font-medium mb-1">شماره موبایل *</label>
+                                <input type="tel" name="mobile" required value={formData.mobile} onChange={handleChange} className="w-full bg-gray-100 dark:bg-gray-700 p-2 rounded-lg focus:ring-2 focus:ring-indigo-500" placeholder="09..." />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium mb-1">شماره موبایل دوم</label>
+                                <input type="tel" name="emergencyphonenumber" value={formData.emergencyphonenumber} onChange={handleChange} className="w-full bg-gray-100 dark:bg-gray-700 p-2 rounded-lg focus:ring-2 focus:ring-indigo-500" />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium mb-1">عنوان</label>
+                                <select name="prefix" value={formData.prefix} onChange={handleChange} className="w-full bg-gray-100 dark:bg-gray-700 p-2 rounded-lg focus:ring-2 focus:ring-indigo-500">
+                                    <option value="">انتخاب...</option>
+                                    <option value="Mr">جناب</option>
+                                    <option value="Mrs">بانو</option>
+                                    <option value="Company">شرکت</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium mb-1">نام کوچک</label>
+                                <input type="text" name="firstname" value={formData.firstname} onChange={handleChange} className="w-full bg-gray-100 dark:bg-gray-700 p-2 rounded-lg focus:ring-2 focus:ring-indigo-500" />
+                            </div>
+                            <div className="md:col-span-2">
+                                <label className="block text-sm font-medium mb-1">نام کامل *</label>
+                                <input type="text" name="fullname" required value={formData.fullname} onChange={handleChange} className="w-full bg-gray-100 dark:bg-gray-700 p-2 rounded-lg focus:ring-2 focus:ring-indigo-500" />
+                            </div>
+                            <div className="md:col-span-2 border-t border-gray-200 dark:border-gray-700 pt-3">
+                                <h4 className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-3">اطلاعات تکمیلی (اختیاری)</h4>
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium mb-1">کانال جذب</label>
+                                <select name="marketingchannelid" value={formData.marketingchannelid} onChange={handleChange} className="w-full bg-gray-100 dark:bg-gray-700 p-2 rounded-lg focus:ring-2 focus:ring-indigo-500">
+                                    <option value="">انتخاب کانال...</option>
+                                    {marketingChannels.map(c => <option key={c.id} value={c.id}>{c.title}</option>)}
+                                </select>
+                            </div>
+                            <div></div> {/* Empty div to align locations on next line */}
+                            <div>
+                                <label className="block text-sm font-medium mb-1">استان</label>
+                                <select name="provinceid" value={formData.provinceid} onChange={(e) => { handleChange(e); setFormData(p => ({...p, cityid: ''})); }} className="w-full bg-gray-100 dark:bg-gray-700 p-2 rounded-lg focus:ring-2 focus:ring-indigo-500">
+                                    <option value="">انتخاب استان...</option>
+                                    {provinces.map(p => <option key={p.id} value={p.id}>{p.title}</option>)}
+                                </select>
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium mb-1 flex justify-between">
+                                    <span>شهر</span>
+                                    {isLoadingCities && <span className="text-xs text-indigo-500">در حال بارگذاری...</span>}
+                                </label>
+                                <select name="cityid" value={formData.cityid} onChange={handleChange} disabled={!formData.provinceid || isLoadingCities} className="w-full bg-gray-100 dark:bg-gray-700 p-2 rounded-lg focus:ring-2 focus:ring-indigo-500 disabled:opacity-50">
+                                    <option value="">انتخاب شهر...</option>
+                                    {cities.map(c => <option key={c.id} value={c.id}>{c.title}</option>)}
+                                </select>
+                            </div>
+                        </div>
+                        {error && <p className="text-red-500 text-sm mt-2">{error}</p>}
+                        <div className="flex justify-end gap-4 pt-4 border-t border-gray-200 dark:border-gray-700 mt-4">
+                            <button type="button" onClick={onClose} className="bg-gray-200 dark:bg-gray-600 py-2 px-5 rounded-lg">انصراف</button>
+                            <button type="submit" disabled={isLoading} className="bg-green-600 hover:bg-green-700 text-white py-2 px-5 rounded-lg flex items-center gap-2 transition">
+                                {isLoading ? <span className="spinner w-4 h-4 border-white"></span> : null}
+                                ثبت مشتری
+                            </button>
+                        </div>
+                    </form>
+                </Modal>
+            );
+        };
+
+        const DemandFormModal = ({ isOpen, onClose, onSave, customers, products, defaultStatusId, onCustomerCreated, customerRoleId, marketingChannels, provinces }) => {
             const [customerId, setCustomerId] = React.useState('');
             const [deadline, setDeadline] = React.useState('');
             const [isEmergency, setIsEmergency] = React.useState(false);
@@ -247,6 +401,7 @@
             const [error, setError] = React.useState('');
             const [isLoading, setIsLoading] = React.useState(false);
             const [supplierPrices, setSupplierPrices] = React.useState({});
+            const [isQuickUserOpen, setIsQuickUserOpen] = React.useState(false);
 
             const [customerLocations, setCustomerLocations] = React.useState([]);
             const [locationId, setLocationId] = React.useState('');
@@ -382,7 +537,9 @@
             };
             
             const customerOptions = customers.map(c => {
-                const displayTitle = `${c.fullname} (${c.mobile || 'بدون شماره'})`;
+                // نمایش تگ نقش در صورتی که کاربر چیزی غیر از مشتری عادی باشد
+                const roleTag = c.role?.title && c.role.title !== 'Customer' ? ` [${c.role.title}]` : '';
+                const displayTitle = `${c.fullname} (${c.mobile || 'بدون شماره'})${roleTag}`;
                 return { id: c.id, title: displayTitle };
             });
             
@@ -399,9 +556,14 @@
                 <Modal isOpen={isOpen} onClose={onClose} title="ثبت تقاضای جدید">
                     <form onSubmit={handleSubmit} className="space-y-6">
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
-                            <div>
-                                <label className="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">مشتری</label>
-                                <SearchableSelect options={customerOptions} value={customerId} onChange={setCustomerId} placeholder="جستجوی نام یا شماره مشتری..." />
+                            <div className="flex items-end gap-2">
+                                <div className="flex-grow">
+                                    <label className="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">مشتری</label>
+                                    <SearchableSelect options={customerOptions} value={customerId} onChange={setCustomerId} placeholder="جستجوی نام یا شماره مشتری..." />
+                                </div>
+                                <button type="button" onClick={() => setIsQuickUserOpen(true)} className="bg-green-500 hover:bg-green-600 text-white rounded-lg px-3 py-2 h-[42px] mb-[0px] transition flex items-center justify-center shadow-sm" title="افزودن مشتری جدید سریع">
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 5a1 1 0 011 1v3h3a1 1 0 110 2h-3v3a1 1 0 11-2 0v-3H6a1 1 0 110-2h3V6a1 1 0 011-1z" clipRule="evenodd" /></svg>
+                                </button>
                             </div>
                             <div>
                                 <label className="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">مهلت تحویل (اختیاری)</label>
@@ -492,6 +654,21 @@
                             <button type="submit" disabled={isLoading} className="bg-indigo-600 text-white py-2 px-5 rounded-lg font-semibold hover:bg-indigo-700 transition disabled:bg-indigo-400">{isLoading ? 'در حال ثبت...' : 'ثبت تقاضا'}</button>
                         </div>
                     </form>
+                    
+                    {isQuickUserOpen && (
+                        <QuickUserFormModal 
+                            isOpen={isQuickUserOpen}
+                            onClose={() => setIsQuickUserOpen(false)}
+                            onSuccess={(newCustomer) => {
+                                onCustomerCreated(newCustomer);
+                                setCustomerId(newCustomer.id);
+                                setIsQuickUserOpen(false);
+                            }}
+                            customerRoleId={customerRoleId}
+                            marketingChannels={marketingChannels}
+                            provinces={provinces}
+                        />
+                    )}
                 </Modal>
             );
         };
@@ -528,7 +705,7 @@
                 setIsFetchingAssignments(true);
                 const { data, error } = await supabaseClient
                     .from('supplier_demand_assignment')
-                    .select('id, assigned_quantity, assigned_price, supplieruserid, profiles:supplieruserid(fullname, mobile), location:locationid(id, address, city(title, province(title)))')
+                    .select('id, assigned_quantity, assigned_price, supplieruserid, location:locationid(id, address, city(title, province(title))), profiles:supplieruserid(fullname, mobile)')
                     .eq('demand_item_id', itemToEdit.id);
 
                 if (error) {
@@ -1198,6 +1375,11 @@
 
             // Currency State
             const [currency, setCurrency] = React.useState(null);
+            
+            // Shared reference data for user creation
+            const [customerRoleId, setCustomerRoleId] = React.useState(null);
+            const [marketingChannels, setMarketingChannels] = React.useState([]);
+            const [provinces, setProvinces] = React.useState([]);
 
             const [countdown, setCountdown] = React.useState(300); // 5 minutes in seconds
             const [searchTerm, setSearchTerm] = React.useState('');
@@ -1294,16 +1476,24 @@
                     setDemands(demandsWithCalculatedStatus || []);
 
                     const customerRoleRes = await supabaseClient.from('role').select('id').eq('title', 'Customer').single();
-                    const customerRoleId = customerRoleRes.data?.id;
+                    const customerRoleIdFetched = customerRoleRes.data?.id;
+                    setCustomerRoleId(customerRoleIdFetched);
 
-                    const [customerRes, productsRes, statusesRes] = await Promise.all([
-                        customerRoleId ? supabaseClient.from('profiles').select('id, fullname, mobile').eq('roleid', customerRoleId).eq('isdeleted', false).order('fullname') : Promise.resolve({ data: [] }),
+                    const [customerRes, productsRes, statusesRes, channelsRes, provincesRes] = await Promise.all([
+                        // اصلاح: حذف فیلتر .eq('roleid', customerRoleIdFetched) تا همه کاربران لود شوند
+                        // همچنین نقش کاربر (role) هم دریافت می‌شود تا در لیست نمایش داده شود
+                        supabaseClient.from('profiles').select('id, fullname, mobile, role:roleid(title)').eq('isdeleted', false).order('fullname'),
                         fetchAllProducts(),
-                        supabaseClient.from('demandstatustype').select('*').order('main_status').order('id')
+                        supabaseClient.from('demandstatustype').select('*').order('main_status').order('id'),
+                        supabaseClient.from('marketingchannel').select('*').order('title'),
+                        supabaseClient.from('province').select('*').order('title')
                     ]);
+                    
                     setCustomers(customerRes.data || []);
                     setProducts(productsRes || []);
                     setDemandStatuses(statusesRes.data || []);
+                    setMarketingChannels(channelsRes.data || []);
+                    setProvinces(provincesRes.data || []);
                     
                     // Set default status ID for new items
                     const defaultStatus = statusesRes.data?.find(s => s.title_farsi === 'در انتظار تامین');
@@ -1957,7 +2147,7 @@
                         </div>
                     )}
 
-                    {isModalOpen && <DemandFormModal isOpen={isModalOpen} onClose={handleCloseModal} onSave={handleSaveDemand} customers={customers} products={products} defaultStatusId={defaultStatusId} />}
+                    {isModalOpen && <DemandFormModal isOpen={isModalOpen} onClose={handleCloseModal} onSave={handleSaveDemand} customers={customers} products={products} defaultStatusId={defaultStatusId} onCustomerCreated={(newCustomer) => { setCustomers(prev => [...prev, newCustomer].sort((a,b) => a.fullname.localeCompare(b.fullname))); }} customerRoleId={customerRoleId} marketingChannels={marketingChannels} provinces={provinces} />}
                     {isEditItemModalOpen && <EditDemandItemModal isOpen={isEditItemModalOpen} onClose={handleCloseEditItemModal} onSave={handleSaveItem} itemToEdit={editingItem} demand={editingDemand} demandStatuses={demandStatuses} groupedStatuses={groupedStatuses} />}
                     {isManageItemsModalOpen && <ManageDemandItemsModal isOpen={isManageItemsModalOpen} onClose={handleCloseManageItemsModal} onSave={handleSaveManagedItems} demandToEdit={demandToManage} products={products} defaultStatusId={defaultStatusId} />}
                     <ConfirmModal isOpen={confirmState.isOpen} onClose={() => setConfirmState({ isOpen: false, onConfirm: null, message: '', title: '' })} onConfirm={confirmState.onConfirm} title={confirmState.title} message={confirmState.message} />
