@@ -508,8 +508,7 @@
             const [assignedSuppliers, setAssignedSuppliers] = React.useState([]);
             const [isFetchingAssignments, setIsFetchingAssignments] = React.useState(false);
             const [stockSuppliers, setStockSuppliers] = React.useState([]); // Suppliers with stock of this product
-            const [supplierLocations, setSupplierLocations] = React.useState([]); // Locations for selected supplier
-            const [newAssignment, setNewAssignment] = React.useState({ supplierId: '', locationId: '', price: '', quantity: '' });
+            const [newAssignment, setNewAssignment] = React.useState({ stockSelection: '', supplierId: '', locationId: '', price: '', quantity: '' });
             const [isAssigning, setIsAssigning] = React.useState(false);
             const { addToast } = useToasts();
             // --- End Assignment State ---
@@ -561,8 +560,7 @@
                     }
 
                     // Reset assignment form
-                    setNewAssignment({ supplierId: '', locationId: '', price: '', quantity: '' });
-                    setSupplierLocations([]);
+                    setNewAssignment({ stockSelection: '', supplierId: '', locationId: '', price: '', quantity: '' });
                     
                     // Fetch existing assignments
                     fetchAssignedSuppliers();
@@ -570,44 +568,80 @@
                     // Fetch Suppliers with stock
                     const fetchStock = async () => {
                         if(!itemToEdit.product?.id) return;
-                        const { data, error } = await supabaseClient
+                        
+                        // ۱. دریافت موجودی تامین‌کنندگان بدون لوکیشن
+                        const { data: stockData, error: stockError } = await supabaseClient
                             .from('supplierstock')
-                            .select('unitprice, supplieruserid, profiles:supplieruserid(fullname)')
+                            .select('unitprice, quantity, lastupdatedat, supplieruserid, profiles:supplieruserid(fullname)')
                             .eq('productid', itemToEdit.product.id);
-                        if(data) setStockSuppliers(data);
+                            
+                        if (stockError) {
+                            console.error("Error fetching stock:", stockError);
+                            setStockSuppliers([]);
+                            return;
+                        }
+                        
+                        if (stockData && stockData.length > 0) {
+                            const supplierIds = [...new Set(stockData.map(s => s.supplieruserid))];
+                            
+                            // ۲. دریافت انبارهای تامین‌کنندگان یافت شده
+                            const { data: locData, error: locError } = await supabaseClient
+                                .from('userlocation')
+                                .select('userid, location(*, city(*, province(*)))')
+                                .in('userid', supplierIds);
+                                
+                            if (locError) console.error("Error fetching locations:", locError);
+                            
+                            // ۳. ترکیب کردن موجودی هر تامین‌کننده با انبارهای او
+                            const combinedStock = [];
+                            stockData.forEach(stock => {
+                                const userLocs = locData ? locData.filter(ul => ul.userid === stock.supplieruserid && ul.location) : [];
+                                if (userLocs.length > 0) {
+                                    // اگر تامین‌کننده چند انبار داشت، برای هر انبار یک رکورد می‌سازیم
+                                    userLocs.forEach(ul => {
+                                        combinedStock.push({
+                                            ...stock,
+                                            locationid: ul.location.id,
+                                            location: ul.location
+                                        });
+                                    });
+                                } else {
+                                    // اگر انبار ثبت شده‌ای نداشت
+                                    combinedStock.push({
+                                        ...stock,
+                                        locationid: null,
+                                        location: null
+                                    });
+                                }
+                            });
+                            
+                            setStockSuppliers(combinedStock);
+                        } else {
+                            setStockSuppliers([]);
+                        }
                     };
                     fetchStock();
                 }
             }, [isOpen, itemToEdit, demand, fetchAssignedSuppliers]);
-
-            // Fetch locations when a supplier is selected in assignment form
-            React.useEffect(() => {
-                if(!newAssignment.supplierId) {
-                    setSupplierLocations([]);
-                    return;
-                }
-                const fetchLocs = async () => {
-                     const { data } = await supabaseClient
-                        .from('userlocation')
-                        .select('location(*, city(*, province(*)))')
-                        .eq('userid', newAssignment.supplierId);
-                     if(data) setSupplierLocations(data.map(ul => ul.location).filter(l => l));
-                }
-                fetchLocs();
-            }, [newAssignment.supplierId]);
             
             const handleAssignmentChange = (e) => {
                 const { name, value } = e.target;
-                setNewAssignment(prev => ({ ...prev, [name]: value }));
                 
-                // If supplier changed, try to auto-fill price from stock
-                if (name === 'supplierId') {
-                    const stockInfo = stockSuppliers.find(s => s.supplieruserid === value);
-                    if (stockInfo) {
-                        setNewAssignment(prev => ({ ...prev, supplierId: value, price: stockInfo.unitprice, locationId: '' }));
+                if (name === 'stockSelection') {
+                    const selectedStock = stockSuppliers.find(s => `${s.supplieruserid}_${s.locationid}` === value);
+                    if (selectedStock) {
+                        setNewAssignment(prev => ({
+                            ...prev,
+                            stockSelection: value,
+                            supplierId: selectedStock.supplieruserid,
+                            locationId: selectedStock.locationid || '',
+                            price: selectedStock.unitprice
+                        }));
                     } else {
-                         setNewAssignment(prev => ({ ...prev, supplierId: value, locationId: '' }));
+                        setNewAssignment(prev => ({ ...prev, stockSelection: value, supplierId: '', locationId: '', price: '' }));
                     }
+                } else {
+                    setNewAssignment(prev => ({ ...prev, [name]: value }));
                 }
             };
 
@@ -647,8 +681,7 @@
                         }
                     }
 
-                    setNewAssignment({ supplierId: '', locationId: '', price: '', quantity: '' });
-                    setSupplierLocations([]);
+                    setNewAssignment({ stockSelection: '', supplierId: '', locationId: '', price: '', quantity: '' });
                     addToast("تامین‌کننده با موفقیت تخصیص یافت.", "success");
                 } catch (err) {
                     console.error("Assignment error:", err);
@@ -786,6 +819,18 @@
                                                         <div className="text-xs text-gray-500 mt-1">
                                                             تعداد: <span className="font-mono font-bold text-gray-700 dark:text-gray-300">{assignment.assigned_quantity}</span> | قیمت: <span className="font-mono font-bold text-green-600">{formatCurrency(assignment.assigned_price)}</span>
                                                         </div>
+                                                        {(() => {
+                                                            const stockInfo = stockSuppliers.find(s => s.supplieruserid === assignment.supplieruserid && s.locationid === (assignment.location?.id || null));
+                                                            if (stockInfo) {
+                                                                return (
+                                                                    <div className="text-[10px] text-indigo-600 dark:text-indigo-400 mt-1.5 flex items-center gap-3 font-bold bg-indigo-50 dark:bg-indigo-900/30 w-fit px-2 py-0.5 rounded border border-indigo-100 dark:border-indigo-800">
+                                                                        <span>موجودی لحظه‌ای: {stockInfo.quantity || 'نامشخص'}</span>
+                                                                        <span>بروزرسانی: {timeAgo(stockInfo.lastupdatedat) || 'نامشخص'}</span>
+                                                                    </div>
+                                                                );
+                                                            }
+                                                            return null;
+                                                        })()}
                                                     </div>
                                                     <button onClick={() => handleDeleteAssignment(assignment.id)} className="text-red-500 hover:text-red-700 p-2 mr-2" title="حذف تخصیص">
                                                          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm4 0a1 1 0 012 0v6a1 1 0 11-2 0V8z" clipRule="evenodd" /></svg>
@@ -803,31 +848,42 @@
                         {/* New Assignment Form */}
                         <div className="bg-gray-50 dark:bg-gray-700/30 p-3 rounded-lg border border-gray-200 dark:border-gray-700">
                              <h5 className="text-sm font-semibold mb-3 text-indigo-700 dark:text-indigo-400">تخصیص تامین‌کننده جدید:</h5>
-                             <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
-                                 <div>
-                                     <label className="block text-xs font-medium text-gray-600 dark:text-gray-300 mb-1">تامین‌کننده (از موجودی کالا)</label>
-                                     <select name="supplierId" value={newAssignment.supplierId} onChange={handleAssignmentChange} className="w-full text-sm p-2 rounded border-gray-300 bg-white dark:bg-gray-700">
+                             <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
+                                 <div className="md:col-span-3">
+                                     <label className="block text-xs font-medium text-gray-600 dark:text-gray-300 mb-1">تامین‌کننده و انبار (از موجودی کالا)</label>
+                                     <select name="stockSelection" value={newAssignment.stockSelection} onChange={handleAssignmentChange} className="w-full text-sm p-2 rounded border-gray-300 bg-white dark:bg-gray-700">
                                          <option value="">انتخاب کنید...</option>
-                                         {stockSuppliers.map(s => (
-                                             <option key={s.supplieruserid} value={s.supplieruserid}>{s.profiles.fullname} - {formatCurrency(s.unitprice)}</option>
-                                         ))}
+                                         {stockSuppliers.map(s => {
+                                             const locId = s.locationid ? `کد ${s.locationid}` : 'بدون انبار';
+                                             const cityName = s.location?.city?.title || '';
+                                             const locString = cityName ? `(${cityName} - ${locId})` : `(${locId})`;
+                                             const stockKey = `${s.supplieruserid}_${s.locationid}`;
+                                             return (
+                                                 <option key={stockKey} value={stockKey}>
+                                                     {s.profiles?.fullname} {locString} - {formatCurrency(s.unitprice)} | موجودی: {s.quantity || '?'} | {timeAgo(s.lastupdatedat) || '?'}
+                                                 </option>
+                                             );
+                                         })}
                                      </select>
+                                     {newAssignment.stockSelection && (() => {
+                                         const selectedStock = stockSuppliers.find(s => `${s.supplieruserid}_${s.locationid}` === newAssignment.stockSelection);
+                                         if (selectedStock) {
+                                             return (
+                                                 <div className="mt-1.5 flex justify-between items-center text-[10px] font-bold text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-900/30 px-2 py-1 rounded border border-indigo-100 dark:border-indigo-800">
+                                                     <span>موجودی فعلی: {selectedStock.quantity || 'نامشخص'}</span>
+                                                     <span>بروزرسانی: {timeAgo(selectedStock.lastupdatedat) || 'نامشخص'}</span>
+                                                 </div>
+                                             );
+                                         }
+                                         return null;
+                                     })()}
                                      {stockSuppliers.length === 0 && <p className="text-xs text-yellow-600 mt-1">هیچ تامین‌کننده‌ای موجودی این کالا را ندارد.</p>}
                                  </div>
                                  <div>
-                                     <label className="block text-xs font-medium text-gray-600 dark:text-gray-300 mb-1">انبار / آدرس</label>
-                                     <select name="locationId" value={newAssignment.locationId} onChange={handleAssignmentChange} className="w-full text-sm p-2 rounded border-gray-300 bg-white dark:bg-gray-700" disabled={!newAssignment.supplierId}>
-                                         <option value="">انتخاب کنید...</option>
-                                         {supplierLocations.map(loc => (
-                                             <option key={loc.id} value={loc.id}>{loc.city?.title} - {loc.address}</option>
-                                         ))}
-                                     </select>
-                                 </div>
-                                 <div>
-                                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-300 mb-1">تعداد</label>
+                                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-300 mb-1">تعداد تخصیص</label>
                                       <input type="number" name="quantity" value={newAssignment.quantity} onChange={handleAssignmentChange} className="w-full text-sm p-2 rounded border-gray-300 bg-white dark:bg-gray-700" placeholder="تعداد" />
                                  </div>
-                                 <div>
+                                 <div className="md:col-span-2">
                                       <label className="block text-xs font-medium text-gray-600 dark:text-gray-300 mb-1">قیمت واحد (تومان)</label>
                                       <input type="number" name="price" value={newAssignment.price} onChange={handleAssignmentChange} className="w-full text-sm p-2 rounded border-gray-300 bg-white dark:bg-gray-700" placeholder="قیمت" />
                                  </div>
