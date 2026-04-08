@@ -682,7 +682,7 @@
             );
         };
         
-        const EditDemandItemModal = ({ isOpen, onClose, onSave, itemToEdit, demand, demandStatuses, groupedStatuses, allProfiles }) => {
+        const EditDemandItemModal = ({ isOpen, onClose, onSave, onRefresh, itemToEdit, demand, demandStatuses, groupedStatuses, allProfiles }) => {
             const [formData, setFormData] = React.useState({ quantity: '', demand_admin_note: '', supply_admin_note: '', approved_supply_price: '', approved_supply_quantity: '' });
             const [statusId, setStatusId] = React.useState('');
             const [cancellationReason, setCancellationReason] = React.useState('');
@@ -701,6 +701,7 @@
             const [assignmentMode, setAssignmentMode] = React.useState('existing'); // 'existing' | 'new'
             const [newSupplierId, setNewSupplierId] = React.useState('');
             const [newSupplierLocId, setNewSupplierLocId] = React.useState('');
+            const [newSupplierStockQuantity, setNewSupplierStockQuantity] = React.useState('100'); // Initial stock
             const [isFetchingNewLocs, setIsFetchingNewLocs] = React.useState(false);
             const [combinedProfileLocs, setCombinedProfileLocs] = React.useState([]);
             const [selectedCombinedLocId, setSelectedCombinedLocId] = React.useState('');
@@ -735,10 +736,10 @@
             const fetchStock = React.useCallback(async () => {
                 if(!itemToEdit?.product?.id) return;
                 
-                // ۱. دریافت موجودی تامین‌کنندگان بدون لوکیشن
+                // ۱. دریافت موجودی تامین‌کنندگان با location_id
                 const { data: stockData, error: stockError } = await supabaseClient
                     .from('supplierstock')
-                    .select('unitprice, quantity, lastupdatedat, supplieruserid, profiles:supplieruserid(fullname, firstname, mobile, emergencyphonenumber)')
+                    .select('unitprice, quantity, lastupdatedat, supplieruserid, location_id, profiles:supplieruserid(fullname, firstname, mobile, emergencyphonenumber)')
                     .eq('productid', itemToEdit.product.id);
                     
                 if (stockError) {
@@ -753,30 +754,25 @@
                     // ۲. دریافت انبارهای تامین‌کنندگان یافت شده
                     const { data: locData, error: locError } = await supabaseClient
                         .from('userlocation')
-                        .select('userid, location(*, city(*, province(*)))')
+                        .select('userid, location(id, address, city(title, province(title)))')
                         .in('userid', supplierIds);
                         
                     if (locError) console.error("Error fetching locations:", locError);
                     
-                    // ۳. ترکیب کردن موجودی هر تامین‌کننده با انبارهای او
+                    // ۳. ترکیب کردن موجودی هر تامین‌کننده با انبار متناظر (بر اساس location_id)
                     const combinedStock = [];
                     stockData.forEach(stock => {
-                        const userLocs = locData ? locData.filter(ul => ul.userid === stock.supplieruserid && ul.location) : [];
-                        if (userLocs.length > 0) {
-                            userLocs.forEach(ul => {
-                                combinedStock.push({
-                                    ...stock,
-                                    locationid: ul.location.id,
-                                    location: ul.location
-                                });
-                            });
-                        } else {
-                            combinedStock.push({
-                                ...stock,
-                                locationid: null,
-                                location: null
-                            });
+                        let matchedLoc = null;
+                        if (locData) {
+                            const ul = locData.find(u => u.userid === stock.supplieruserid && u.location?.id === stock.location_id);
+                            if (ul) matchedLoc = ul.location;
                         }
+                        
+                        combinedStock.push({
+                            ...stock,
+                            locationid: stock.location_id,
+                            location: matchedLoc
+                        });
                     });
                     
                     setStockSuppliers(combinedStock);
@@ -856,6 +852,7 @@
                     setAssignmentMode('existing');
                     setNewSupplierId('');
                     setNewSupplierLocId('');
+                    setNewSupplierStockQuantity('100');
                     setSelectedCombinedLocId('');
                     
                     // Fetch existing assignments
@@ -915,13 +912,18 @@
                 setIsAssigning(true);
                 setError('');
                 try {
+                    // Updating or Inserting Stock
                     if (finalLocationId && itemToEdit.product?.id) {
-                        const { data: existingStock } = await supabaseClient
+                        const { data: existingStock, error: existingStockErr } = await supabaseClient
                             .from('supplierstock')
                             .select('location_id, productid')
                             .eq('location_id', finalLocationId)
                             .eq('productid', itemToEdit.product.id)
-                            .single();
+                            .maybeSingle();
+
+                        if (existingStockErr && existingStockErr.code !== 'PGRST116') {
+                            console.error("Error checking existing stock:", existingStockErr);
+                        }
 
                         if (existingStock) {
                             const { error: stockError } = await supabaseClient
@@ -942,7 +944,7 @@
                                     productid: itemToEdit.product.id,
                                     location_id: finalLocationId,
                                     unitprice: Number(newAssignment.price),
-                                    quantity: 0,
+                                    quantity: assignmentMode === 'new' ? Number(newSupplierStockQuantity) : 100,
                                     is_available: true
                                 });
                             
@@ -950,6 +952,7 @@
                         }
                     }
 
+                    // Inserting Supplier Assignment
                     const { error } = await supabaseClient.from('supplier_demand_assignment').insert({
                         demand_item_id: itemToEdit.id,
                         supplieruserid: finalSupplierId,
@@ -960,10 +963,7 @@
 
                     if (error) throw error;
 
-                    await fetchAssignedSuppliers();
-                    await fetchStock(); // Refresh stock list
-                    
-                    // Auto-fill the approved quantity and price in the form
+                    // Auto-fill the approved quantity and price in the form UI
                     setFormData(prev => ({
                         ...prev,
                         approved_supply_quantity: Number(newAssignment.quantity),
@@ -971,17 +971,39 @@
                     }));
 
                     // Auto-change status if it was "در انتظار تامین"
+                    let newStatusId = statusId;
                     const currentStatus = demandStatuses.find(s => s.id === statusId);
-                    if (currentStatus && currentStatus.title_farsi === 'در انتظار تامین') {
-                        const targetStatus = demandStatuses.find(s => s.title_farsi === 'کالا تامین شد و منتظر تصمیم مشتری هست');
+                    if (!currentStatus || currentStatus.title_farsi.trim() === 'در انتظار تامین') {
+                        const targetStatus = demandStatuses.find(s => s.title_farsi.trim() === 'کالا تامین شد و منتظر تصمیم مشتری هست');
                         if (targetStatus) {
+                            newStatusId = targetStatus.id;
                             setStatusId(targetStatus.id);
                         }
                     }
 
+                    // Auto-save the item update to DB immediately so the background view isn't stale
+                    const { error: updateError } = await supabaseClient.from('demand_item').update({
+                        approved_supply_quantity: Number(newAssignment.quantity),
+                        approved_supply_price: Number(newAssignment.price),
+                        demandstatusid: newStatusId
+                    }).eq('id', itemToEdit.id);
+
+                    if (updateError) console.error("Error auto-updating item:", updateError);
+                    
+                    if (newStatusId !== statusId) {
+                        await supabaseClient.from('demandstatuslog').insert({ demand_item_id: itemToEdit.id, demandstatusid: newStatusId });
+                        await supabaseClient.from('demand_item_log').insert({ demand_item_id: itemToEdit.id, change_description: 'وضعیت به صورت خودکار پس از تخصیص تامین‌کننده تغییر کرد.' });
+                    }
+
+                    // Refreshing Data
+                    await fetchAssignedSuppliers();
+                    await fetchStock(); 
+                    if (typeof onRefresh === 'function') onRefresh();
+
                     setNewAssignment({ stockSelection: '', supplierId: '', locationId: '', price: '', quantity: '' });
                     setNewSupplierId('');
                     setNewSupplierLocId('');
+                    setNewSupplierStockQuantity('100');
                     setSelectedCombinedLocId('');
                     addToast("تامین‌کننده با موفقیت تخصیص یافت.", "success");
                 } catch (err) {
@@ -1226,28 +1248,41 @@
                                          {stockSuppliers.length === 0 && <p className="text-xs text-yellow-600 mt-1">هیچ تامین‌کننده‌ای موجودی این کالا را ندارد.</p>}
                                      </div>
                                  ) : (
-                                     <div className="md:col-span-3 bg-indigo-50/50 dark:bg-indigo-900/10 p-3 rounded border border-indigo-100 dark:border-indigo-800/30 mb-1">
-                                         <label className="block text-xs font-medium text-gray-600 dark:text-gray-300 mb-1 flex justify-between">
-                                             <span>جستجو و انتخاب تامین‌کننده و انبار</span>
-                                             {isFetchingNewLocs && <span className="text-indigo-500 text-[10px]">در حال بارگذاری...</span>}
-                                         </label>
-                                         <SearchableSelect 
-                                             options={combinedProfileLocs} 
-                                             value={selectedCombinedLocId} 
-                                             onChange={(val) => {
-                                                 setSelectedCombinedLocId(val);
-                                                 const selected = combinedProfileLocs.find(c => c.id === val);
-                                                 if (selected) {
-                                                     setNewSupplierId(selected.supplierId);
-                                                     setNewSupplierLocId(selected.locationId);
-                                                 } else {
-                                                     setNewSupplierId('');
-                                                     setNewSupplierLocId('');
-                                                 }
-                                             }} 
-                                             placeholder="جستجوی تامین‌کننده..." 
-                                             disabled={isFetchingNewLocs}
-                                         />
+                                     <div className="md:col-span-3 grid grid-cols-1 sm:grid-cols-2 gap-3 bg-indigo-50/50 dark:bg-indigo-900/10 p-3 rounded border border-indigo-100 dark:border-indigo-800/30 mb-1">
+                                         <div>
+                                             <label className="block text-xs font-medium text-gray-600 dark:text-gray-300 mb-1 flex justify-between">
+                                                 <span>جستجو و انتخاب تامین‌کننده و انبار</span>
+                                                 {isFetchingNewLocs && <span className="text-indigo-500 text-[10px]">در حال بارگذاری...</span>}
+                                             </label>
+                                             <SearchableSelect 
+                                                 options={combinedProfileLocs} 
+                                                 value={selectedCombinedLocId} 
+                                                 onChange={(val) => {
+                                                     setSelectedCombinedLocId(val);
+                                                     const selected = combinedProfileLocs.find(c => c.id === val);
+                                                     if (selected) {
+                                                         setNewSupplierId(selected.supplierId);
+                                                         setNewSupplierLocId(selected.locationId);
+                                                     } else {
+                                                         setNewSupplierId('');
+                                                         setNewSupplierLocId('');
+                                                     }
+                                                 }} 
+                                                 placeholder="جستجوی تامین‌کننده..." 
+                                                 disabled={isFetchingNewLocs}
+                                             />
+                                         </div>
+                                         <div>
+                                              <label className="block text-xs font-medium text-gray-600 dark:text-gray-300 mb-1">موجودی اولیه انبار</label>
+                                              <input 
+                                                  type="number" 
+                                                  value={newSupplierStockQuantity} 
+                                                  onChange={e => setNewSupplierStockQuantity(e.target.value)} 
+                                                  className="w-full text-sm p-2 rounded border-gray-300 bg-white dark:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500" 
+                                                  min="0" 
+                                                  placeholder="مثلاً 100" 
+                                              />
+                                         </div>
                                      </div>
                                  )}
 
@@ -2361,7 +2396,7 @@
                     )}
 
                     {isModalOpen && <DemandFormModal isOpen={isModalOpen} onClose={handleCloseModal} onSave={handleSaveDemand} customers={customers} products={products} defaultStatusId={defaultStatusId} onCustomerCreated={(newCustomer) => { setCustomers(prev => [...prev, newCustomer].sort((a,b) => a.fullname.localeCompare(b.fullname))); }} customerRoleId={customerRoleId} marketingChannels={marketingChannels} provinces={provinces} />}
-                    {isEditItemModalOpen && <EditDemandItemModal isOpen={isEditItemModalOpen} onClose={handleCloseEditItemModal} onSave={handleSaveItem} itemToEdit={editingItem} demand={editingDemand} demandStatuses={demandStatuses} groupedStatuses={groupedStatuses} allProfiles={customers} />}
+                    {isEditItemModalOpen && <EditDemandItemModal isOpen={isEditItemModalOpen} onClose={handleCloseEditItemModal} onSave={handleSaveItem} onRefresh={fetchData} itemToEdit={editingItem} demand={editingDemand} demandStatuses={demandStatuses} groupedStatuses={groupedStatuses} allProfiles={customers} />}
                     {isManageItemsModalOpen && <ManageDemandItemsModal isOpen={isManageItemsModalOpen} onClose={handleCloseManageItemsModal} onSave={handleSaveManagedItems} demandToEdit={demandToManage} products={products} defaultStatusId={defaultStatusId} />}
                     <ConfirmModal isOpen={confirmState.isOpen} onClose={() => setConfirmState({ isOpen: false, onConfirm: null, message: '', title: '' })} onConfirm={confirmState.onConfirm} title={confirmState.title} message={confirmState.message} />
                 </div>
