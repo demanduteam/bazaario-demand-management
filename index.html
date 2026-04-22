@@ -39,6 +39,7 @@
         body {
             font-family: 'Vazirmatn', sans-serif;
             background-color: #f3f4f6; /* bg-gray-100 */
+            scroll-behavior: smooth;
         }
         .dark body {
             background-color: #111827; /* dark:bg-gray-900 */
@@ -788,7 +789,8 @@
             React.useEffect(() => {
                 const initialInputs = {};
                 stockSuppliers.forEach(s => {
-                    const key = `${s.supplieruserid}_${s.locationid}`;
+                    const locId = s.locationid || 'null';
+                    const key = `${s.supplieruserid}_${locId}`;
                     initialInputs[key] = {
                         price: s.unitprice || '',
                         quantity: ''
@@ -914,15 +916,22 @@
                 }
                 setIsAssigning(true);
                 try {
-                    const { error } = await supabaseClient
+                    let query = supabaseClient
                         .from('supplierstock')
                         .update({ 
                             unitprice: Number(newPrice),
                             lastupdatedat: new Date().toISOString()
                         })
-                        .eq('location_id', locationId)
                         .eq('productid', itemToEdit.product.id)
                         .eq('supplieruserid', supplierId);
+                    
+                    if (locationId === 'null') {
+                        query = query.is('location_id', null);
+                    } else {
+                        query = query.eq('location_id', locationId);
+                    }
+
+                    const { error } = await query;
                     
                     if (error) throw error;
                     addToast("قیمت با موفقیت در سیستم به‌روزرسانی شد.", "success");
@@ -945,21 +954,27 @@
                 setError('');
                 try {
                     // 1. Update the price in stock
-                    await supabaseClient
+                    let query = supabaseClient
                         .from('supplierstock')
                         .update({ 
                             unitprice: Number(price),
                             lastupdatedat: new Date().toISOString()
                         })
-                        .eq('location_id', locationId)
                         .eq('productid', itemToEdit.product.id)
                         .eq('supplieruserid', supplierId);
+                        
+                    if (locationId === 'null') {
+                        query = query.is('location_id', null);
+                    } else {
+                        query = query.eq('location_id', locationId);
+                    }
+                    await query;
 
                     // 2. Create Assignment
                     const { error: assignError } = await supabaseClient.from('supplier_demand_assignment').insert({
                         demand_item_id: itemToEdit.id,
                         supplieruserid: supplierId,
-                        locationid: locationId || null,
+                        locationid: locationId === 'null' ? null : locationId,
                         assigned_quantity: Number(quantity),
                         assigned_price: Number(price)
                     });
@@ -1011,7 +1026,6 @@
                 }
             };
 
-            // This function remains for "New" assignment mode
             const handleAssignSupplier = async () => {
                 let finalSupplierId = '';
                 let finalLocationId = null;
@@ -1109,7 +1123,7 @@
                         }
                     }
 
-                    // Auto-save the item update to DB immediately so the background view isn't stale
+                    // Auto-save the item update to DB immediately so the background view isnt stale
                     const { error: updateError } = await supabaseClient.from('demand_item').update({
                         approved_supply_quantity: Number(newAssignment.quantity),
                         approved_supply_price: Number(newAssignment.price),
@@ -2108,7 +2122,7 @@
                             }
                             await supabaseClient.from('demand_item').delete().eq('demandid', demandId);
                             await supabaseClient.from('demand').delete().eq('id', demandId);
-                            fetchData(); 
+                            fetchData(true); 
                             addToast('تقاضا با موفقیت حذف شد.');
                         } catch (err) {
                             console.error("Error deleting demand:", err);
@@ -2179,7 +2193,7 @@
                             }
 
                             addToast('تقاضای جدید با موفقیت صادر شد', 'success');
-                            fetchData(); // Refresh demands list
+                            fetchData(true); // Refresh demands list
                             // Optionally refresh retargeting list if needed, but not strictly required as the old one stays "cancelled" until acted upon or logic changes
                             
                         } catch (err) {
@@ -2194,16 +2208,24 @@
 
             const handleOpenModal = () => setIsModalOpen(true);
             const handleCloseModal = () => setIsModalOpen(false);
-            const handleSaveDemand = () => { fetchData(); handleCloseModal(); addToast('تقاضای جدید با موفقیت ثبت شد.') };
+            const handleSaveDemand = () => { fetchData(true); handleCloseModal(); addToast('تقاضای جدید با موفقیت ثبت شد.') };
             
             const handleOpenEditItemModal = (item, demand) => { setEditingItem(item); setEditingDemand(demand); setIsEditItemModalOpen(true); };
             const handleCloseEditItemModal = () => { setEditingItem(null); setEditingDemand(null); setIsEditItemModalOpen(false); };
-            const handleSaveItem = () => { fetchData(); handleCloseEditItemModal(); addToast('آیتم با موفقیت به‌روزرسانی شد.'); };
+            const handleSaveItem = () => { fetchData(true); handleCloseEditItemModal(); addToast('آیتم با موفقیت به‌روزرسانی شد.'); };
 
             const handleOpenManageItemsModal = (demand) => { setDemandToManage(demand); setIsManageItemsModalOpen(true); };
             const handleCloseManageItemsModal = () => { setDemandToManage(null); setIsManageItemsModalOpen(false); };
-            const handleSaveManagedItems = () => { fetchData(); handleCloseManageItemsModal(); addToast('اقلام تقاضا با موفقیت مدیریت شد.'); };
+            const handleSaveManagedItems = () => { fetchData(true); handleCloseManageItemsModal(); addToast('اقلام تقاضا با موفقیت مدیریت شد.'); };
             
+            const scrollToTop = () => {
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+            };
+            
+            const scrollToBottom = () => {
+                window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'smooth' });
+            };
+
             const groupedStatuses = React.useMemo(() => {
                 // Group statuses by their main_status (e.g., Open, Fulfilled, Cancelled)
                 return demandStatuses.reduce((acc, status) => {
@@ -2584,6 +2606,16 @@
                     {isEditItemModalOpen && <EditDemandItemModal isOpen={isEditItemModalOpen} onClose={handleCloseEditItemModal} onSave={handleSaveItem} onRefresh={fetchData} itemToEdit={editingItem} demand={editingDemand} demandStatuses={demandStatuses} groupedStatuses={groupedStatuses} allProfiles={customers} />}
                     {isManageItemsModalOpen && <ManageDemandItemsModal isOpen={isManageItemsModalOpen} onClose={handleCloseManageItemsModal} onSave={handleSaveManagedItems} demandToEdit={demandToManage} products={products} defaultStatusId={defaultStatusId} />}
                     <ConfirmModal isOpen={confirmState.isOpen} onClose={() => setConfirmState({ isOpen: false, onConfirm: null, message: '', title: '' })} onConfirm={confirmState.onConfirm} title={confirmState.title} message={confirmState.message} />
+                    
+                    {/* Floating Scroll Buttons */}
+                    <div className="fixed bottom-6 right-6 z-[90] flex flex-col gap-3">
+                        <button onClick={scrollToTop} className="bg-gray-800/40 hover:bg-gray-800 dark:bg-gray-700/40 dark:hover:bg-gray-700 text-white p-2.5 rounded-full backdrop-blur-md transition-all shadow-lg flex items-center justify-center" title="برگشت به بالا">
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 15l7-7 7 7" /></svg>
+                        </button>
+                        <button onClick={scrollToBottom} className="bg-gray-800/40 hover:bg-gray-800 dark:bg-gray-700/40 dark:hover:bg-gray-700 text-white p-2.5 rounded-full backdrop-blur-md transition-all shadow-lg flex items-center justify-center" title="رفتن به پایین">
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" /></svg>
+                        </button>
+                    </div>
                 </div>
             );
         };
