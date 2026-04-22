@@ -402,7 +402,7 @@
             );
         };
 
-        const DemandFormModal = ({ isOpen, onClose, onSave, customers, products, defaultStatusId, onCustomerCreated, customerRoleId, marketingChannels, provinces }) => {
+        const DemandFormModal = ({ isOpen, onClose, onSave, customers, products, defaultStatusId, onCustomerCreated, customerRoleId, marketingChannels, provinces, initialData }) => {
             const [customerId, setCustomerId] = React.useState('');
             const [deadline, setDeadline] = React.useState('');
             const [isEmergency, setIsEmergency] = React.useState(false);
@@ -415,6 +415,28 @@
             const [customerLocations, setCustomerLocations] = React.useState([]);
             const [locationId, setLocationId] = React.useState('');
             const [isFetchingLocations, setIsFetchingLocations] = React.useState(false);
+
+            // --- NEW: Load initial data if provided (from Pre-Demand) ---
+            React.useEffect(() => {
+                if (initialData && isOpen) {
+                    setCustomerId(initialData.customerId || '');
+                    if (initialData.items && initialData.items.length > 0) {
+                        setItems(initialData.items.map(item => ({
+                            productid: item.id,
+                            quantity: item.suggestedQty || '',
+                            demand_admin_note: '',
+                            supply_admin_note: '',
+                            key: crypto.randomUUID()
+                        })));
+                    }
+                } else if (isOpen) {
+                    // Reset if opened normally
+                    setCustomerId('');
+                    setItems([{ productid: '', quantity: '', demand_admin_note: '', supply_admin_note: '', key: crypto.randomUUID() }]);
+                    setDeadline('');
+                    setIsEmergency(false);
+                }
+            }, [initialData, isOpen]);
 
             React.useEffect(() => {
                 const fetchLocations = async () => {
@@ -1793,8 +1815,14 @@
             const [isRetargetingLoading, setIsRetargetingLoading] = React.useState(false);
             const [retargetingSearchTerm, setRetargetingSearchTerm] = React.useState('');
             const [retargetingTimeFilter, setRetargetingTimeFilter] = React.useState('all');
-            // --- NEW: Cancellation Time Filter State ---
             const [retargetingCancellationFilter, setRetargetingCancellationFilter] = React.useState('all');
+
+            // --- NEW: Pre-Demand (Offer) State ---
+            const [preDemandCustomerId, setPreDemandCustomerId] = React.useState('');
+            const [preDemandTimeframe, setPreDemandTimeframe] = React.useState('90');
+            const [preDemandItems, setPreDemandItems] = React.useState([]);
+            const [isPreDemandLoading, setIsPreDemandLoading] = React.useState(false);
+            const [demandModalInitialData, setDemandModalInitialData] = React.useState(null);
 
             const [customers, setCustomers] = React.useState([]);
             const [products, setProducts] = React.useState([]);
@@ -2021,6 +2049,161 @@
                     setIsRetargetingLoading(false);
                 }
             };
+
+            // --- NEW: Pre-Demand Logic ---
+            const generatePreDemandList = async () => {
+                if (!preDemandCustomerId) {
+                    addToast("ابتدا یک مشتری را انتخاب کنید.", "error");
+                    return;
+                }
+                
+                setIsPreDemandLoading(true);
+                setPreDemandItems([]);
+                try {
+                    // 1. Calculate cutoff date
+                    const cutoff = new Date();
+                    cutoff.setDate(cutoff.getDate() - parseInt(preDemandTimeframe));
+
+                    // 2. Filter fulfilled or open demands for this customer in the timeframe
+                    const customerDemands = demands.filter(d => 
+                        d.profiles?.id === preDemandCustomerId &&
+                        new Date(d.createdat) >= cutoff
+                    );
+
+                    // 3. Aggregate products and quantities
+                    const productAgg = {};
+                    customerDemands.forEach(d => {
+                        d.demand_item.forEach(item => {
+                            if (!item.product) return;
+                            // Ignore cancelled items from history calculation
+                            if (item.demandstatustype?.main_status === 'Cancelled') return;
+
+                            if (!productAgg[item.product.id]) {
+                                productAgg[item.product.id] = {
+                                    product: item.product,
+                                    totalHistoryQty: 0,
+                                    orderCount: 0,
+                                };
+                            }
+                            productAgg[item.product.id].totalHistoryQty += item.quantity || 0;
+                            productAgg[item.product.id].orderCount += 1;
+                        });
+                    });
+
+                    const productIds = Object.keys(productAgg);
+                    if (productIds.length === 0) {
+                        addToast("هیچ سابقه خرید موفقی در این بازه زمانی برای مشتری یافت نشد.", "error");
+                        setIsPreDemandLoading(false);
+                        return;
+                    }
+
+                    // 4. Fetch current market prices from supplier stock for these products
+                    const { data: stockData, error: stockError } = await supabaseClient
+                        .from('supplierstock')
+                        .select('productid, unitprice, profiles:supplieruserid(fullname)')
+                        .in('productid', productIds);
+                    
+                    if (stockError) throw stockError;
+
+                    // 5. Build the final list with calculated averages
+                    const months = Math.max(1, parseInt(preDemandTimeframe) / 30);
+                    const finalItems = productIds.map(pid => {
+                        const agg = productAgg[pid];
+                        const monthlyAvg = Math.ceil(agg.totalHistoryQty / months);
+                        // Suggestion logic: Use monthly average as base, or history if it's small. User can edit.
+                        const suggestedQty = monthlyAvg > 0 ? monthlyAvg : agg.totalHistoryQty;
+
+                        // Get current market prices for this product
+                        const productStocks = stockData ? stockData.filter(s => s.productid === pid && s.unitprice > 0) : [];
+                        // Sort by price ascending
+                        productStocks.sort((a,b) => a.unitprice - b.unitprice);
+                        
+                        // Create a summary string of the best 2-3 prices
+                        const priceSummary = productStocks.slice(0, 3).map(s => 
+                            `${formatCurrency(s.unitprice)} (${s.profiles?.fullname.split(' ')[0]})`
+                        ).join(' | ');
+
+                        return {
+                            id: pid,
+                            product: agg.product,
+                            totalHistoryQty: agg.totalHistoryQty,
+                            monthlyAvg,
+                            suggestedQty,
+                            marketPrices: priceSummary || 'قیمت روز موجود نیست'
+                        };
+                    });
+
+                    // Sort by highest historical quantity
+                    finalItems.sort((a,b) => b.totalHistoryQty - a.totalHistoryQty);
+                    setPreDemandItems(finalItems);
+                    addToast(`لیست با ${finalItems.length} قلم کالا با موفقیت تولید شد.`, "success");
+
+                } catch (e) {
+                    console.error("Error generating pre-demand:", e);
+                    addToast("خطا در تولید لیست پیش‌تقاضا.", "error");
+                } finally {
+                    setIsPreDemandLoading(false);
+                }
+            };
+
+            const handlePreDemandItemQtyChange = (productId, newQty) => {
+                setPreDemandItems(prev => prev.map(item => 
+                    item.id === productId ? { ...item, suggestedQty: newQty } : item
+                ));
+            };
+
+            const handleRemovePreDemandItem = (productId) => {
+                setPreDemandItems(prev => prev.filter(item => item.id !== productId));
+            };
+
+            const exportPreDemandToWhatsAppSuppliers = () => {
+                const customerName = customers.find(c => c.id === preDemandCustomerId)?.fullname || 'مشتری';
+                let text = `سلام، لطفا قیمت بروز و موجودی اقلام زیر را اعلام فرمایید:\n\n`;
+                preDemandItems.forEach((item, index) => {
+                    if(item.suggestedQty > 0) {
+                        text += `${index + 1}. ${item.product.brand?.title || ''} ${item.product.title}\n`;
+                        text += `▫️ تعداد: ${item.suggestedQty}\n\n`;
+                    }
+                });
+                text += `با تشکر`;
+                navigator.clipboard.writeText(text);
+                addToast("پیام استعلام تامین‌کنندگان کپی شد.", "success");
+            };
+
+            const exportPreDemandToWhatsAppCustomer = () => {
+                const customerName = customers.find(c => c.id === preDemandCustomerId)?.fullname || 'مشتری';
+                let text = `جناب/سرکار ${customerName} عزیز، سلام.\nبا توجه به بررسی سوابق مصرف شما، پیشنهاد خرید دوره‌ای زیر جهت بررسی و تامین به موقع تقدیم می‌گردد:\n\n`;
+                preDemandItems.forEach((item, index) => {
+                    if(item.suggestedQty > 0) {
+                        text += `🔹 ${item.product.brand?.title || ''} ${item.product.title} (تعداد: ${item.suggestedQty})\n`;
+                    }
+                });
+                text += `\nدر صورت تایید، لطفا اطلاع دهید تا تامین کالا انجام شود.`;
+                navigator.clipboard.writeText(text);
+                addToast("پیام پیشنهاد برای مشتری کپی شد.", "success");
+            };
+
+            const convertPreDemandToActualDemand = () => {
+                if (preDemandItems.length === 0) return;
+                const itemsToConvert = preDemandItems.filter(item => item.suggestedQty > 0);
+                if (itemsToConvert.length === 0) {
+                    addToast("حداقل تعداد یک کالا باید بیشتر از صفر باشد.", "error");
+                    return;
+                }
+                
+                setDemandModalInitialData({
+                    customerId: preDemandCustomerId,
+                    items: itemsToConvert
+                });
+                setIsModalOpen(true);
+            };
+
+            const customerOptions = customers.map(c => {
+                const roleTag = c.role?.title && c.role.title !== 'Customer' ? ` [${c.role.title}]` : '';
+                const displayName = formatProfileName(c);
+                const displayTitle = `${displayName} (${c.mobile || 'بدون شماره'})${roleTag}`;
+                return { id: c.id, title: displayTitle };
+            });
 
             // Effect for countdown timer and auto-refresh
             React.useEffect(() => {
@@ -2301,6 +2484,13 @@
                         >
                             <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
                             بازاریابی مجدد (Retargeting)
+                        </button>
+                        <button 
+                            className={`py-3 px-6 font-medium text-sm border-b-2 transition-colors whitespace-nowrap flex items-center gap-2 ${activeTab === 'predemand' ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400' : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'}`}
+                            onClick={() => setActiveTab('predemand')}
+                        >
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" /></svg>
+                            آفر و پیش‌تقاضا
                         </button>
                     </div>
 
@@ -2602,7 +2792,156 @@
                         </div>
                     )}
 
-                    {isModalOpen && <DemandFormModal isOpen={isModalOpen} onClose={handleCloseModal} onSave={handleSaveDemand} customers={customers} products={products} defaultStatusId={defaultStatusId} onCustomerCreated={(newCustomer) => { setCustomers(prev => [...prev, newCustomer].sort((a,b) => a.fullname.localeCompare(b.fullname))); }} customerRoleId={customerRoleId} marketingChannels={marketingChannels} provinces={provinces} />}
+                    {/* Content for Pre-Demand (Offer) */}
+                    {activeTab === 'predemand' && (
+                        <div className="space-y-6 animate-toast-in">
+                            <div className="bg-gradient-to-r from-indigo-50 to-purple-50 dark:from-indigo-900/20 dark:to-purple-900/20 p-4 rounded-lg border border-indigo-100 dark:border-indigo-800 text-sm">
+                                <p className="font-semibold text-indigo-800 dark:text-indigo-300 flex items-center gap-2">
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+                                    تولید هوشمند پیشنهاد خرید
+                                </p>
+                                <p className="mt-2 text-indigo-700 dark:text-indigo-400/80 leading-relaxed">
+                                    در این بخش می‌توانید با بررسی سوابق خرید یک مشتری در بازه‌های زمانی مختلف، لیستی از کالاهای پرمصرف او را استخراج کنید. سیستم بر اساس میانگین مصرف، تعداد مورد نیاز را پیش‌بینی می‌کند و آخرین قیمت‌های ثبت‌شده در بازار را برای تصمیم‌گیری بهتر مدیر تقاضا نمایش می‌دهد. این لیست قابلیت ویرایش و تبدیل مستقیم به تقاضای رسمی را دارد.
+                                </p>
+                            </div>
+
+                            {/* Filters / Config for Pre-Demand */}
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end bg-white dark:bg-gray-800 p-5 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700">
+                                <div className="md:col-span-1">
+                                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5 block">انتخاب مشتری</label>
+                                    <SearchableSelect 
+                                        options={customerOptions} 
+                                        value={preDemandCustomerId} 
+                                        onChange={setPreDemandCustomerId} 
+                                        placeholder="جستجوی نام مشتری..." 
+                                    />
+                                </div>
+                                <div className="md:col-span-1">
+                                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5 block">محاسبه بر اساس سوابق</label>
+                                    <select 
+                                        value={preDemandTimeframe} 
+                                        onChange={e => setPreDemandTimeframe(e.target.value)} 
+                                        className="w-full p-2 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 focus:ring-2 focus:ring-indigo-500 rounded-lg text-gray-700 dark:text-gray-200"
+                                    >
+                                        <option value="30">یک ماه گذشته</option>
+                                        <option value="90">سه ماه گذشته</option>
+                                        <option value="180">شش ماه گذشته</option>
+                                        <option value="365">یک سال گذشته</option>
+                                        <option value="3650">کل سوابق</option>
+                                    </select>
+                                </div>
+                                <div className="md:col-span-1">
+                                    <button 
+                                        onClick={generatePreDemandList} 
+                                        disabled={isPreDemandLoading || !preDemandCustomerId}
+                                        className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 px-4 rounded-lg flex justify-center items-center gap-2 transition shadow disabled:opacity-50 disabled:cursor-not-allowed h-[42px]"
+                                    >
+                                        {isPreDemandLoading ? (
+                                            <span className="spinner w-4 h-4 border-white m-0 border-2"></span>
+                                        ) : (
+                                            <>
+                                                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 002-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></svg>
+                                                تولید لیست پیش‌تقاضا
+                                            </>
+                                        )}
+                                    </button>
+                                </div>
+                            </div>
+
+                            {/* Generated List Section */}
+                            {preDemandItems.length > 0 && (
+                                <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 overflow-hidden">
+                                    <div className="p-4 border-b border-gray-100 dark:border-gray-700 flex justify-between items-center bg-gray-50 dark:bg-gray-900/30">
+                                        <h3 className="font-bold text-gray-800 dark:text-gray-100 flex items-center gap-2">
+                                            <span className="bg-indigo-100 text-indigo-800 dark:bg-indigo-900 dark:text-indigo-200 py-0.5 px-2 rounded-full text-sm font-mono">{preDemandItems.length}</span>
+                                            آیتم پیشنهادی
+                                        </h3>
+                                    </div>
+                                    
+                                    <div className="overflow-x-auto">
+                                        <table className="min-w-full text-sm text-right">
+                                            <thead className="bg-gray-100/50 dark:bg-gray-800/80 text-gray-600 dark:text-gray-400 border-b border-gray-200 dark:border-gray-700">
+                                                <tr>
+                                                    <th className="p-4 font-semibold">محصول</th>
+                                                    <th className="p-4 font-semibold text-center">خرید گذشته</th>
+                                                    <th className="p-4 font-semibold text-center">متوسط ماهانه</th>
+                                                    <th className="p-4 font-semibold text-center w-32">تعداد آفر</th>
+                                                    <th className="p-4 font-semibold">وضعیت بازار (کمترین قیمت‌ها)</th>
+                                                    <th className="p-4 font-semibold text-center">عملیات</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-gray-100 dark:divide-gray-700/50">
+                                                {preDemandItems.map((item) => (
+                                                    <tr key={item.id} className="hover:bg-gray-50/50 dark:hover:bg-gray-700/20 transition-colors">
+                                                        <td className="p-4 font-medium text-gray-800 dark:text-gray-200">
+                                                            {item.product?.brand?.title} {item.product?.title}
+                                                        </td>
+                                                        <td className="p-4 text-center font-mono text-gray-500 dark:text-gray-400">
+                                                            {item.totalHistoryQty}
+                                                        </td>
+                                                        <td className="p-4 text-center font-mono text-gray-500 dark:text-gray-400">
+                                                            {item.monthlyAvg}
+                                                        </td>
+                                                        <td className="p-4">
+                                                            <input 
+                                                                type="number" 
+                                                                value={item.suggestedQty} 
+                                                                onChange={(e) => handlePreDemandItemQtyChange(item.id, e.target.value)}
+                                                                className="w-full text-center p-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 focus:ring-2 focus:ring-indigo-500 font-mono font-bold"
+                                                                min="0"
+                                                            />
+                                                        </td>
+                                                        <td className="p-4 text-xs font-mono text-gray-500 dark:text-gray-400 leading-relaxed">
+                                                            {item.marketPrices}
+                                                        </td>
+                                                        <td className="p-4 text-center">
+                                                            <button 
+                                                                onClick={() => handleRemovePreDemandItem(item.id)} 
+                                                                className="text-red-400 hover:text-red-600 dark:hover:text-red-400 p-2 rounded-full hover:bg-red-50 dark:hover:bg-red-900/30 transition"
+                                                                title="حذف از لیست"
+                                                            >
+                                                                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm4 0a1 1 0 012 0v6a1 1 0 11-2 0V8z" clipRule="evenodd" /></svg>
+                                                            </button>
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                    
+                                    {/* Action Bottom Bar */}
+                                    <div className="p-4 border-t border-gray-100 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/30 flex flex-col md:flex-row justify-between items-center gap-4">
+                                        <div className="flex flex-wrap gap-2 w-full md:w-auto">
+                                            <button 
+                                                onClick={exportPreDemandToWhatsAppSuppliers}
+                                                className="flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 text-sm font-medium transition shadow-sm"
+                                            >
+                                                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-green-500" viewBox="0 0 20 20" fill="currentColor"><path d="M8 3a1 1 0 011-1h2a1 1 0 110 2H9a1 1 0 01-1-1z" /><path d="M6 3a2 2 0 00-2 2v11a2 2 0 002 2h8a2 2 0 002-2V5a2 2 0 00-2-2 3 3 0 01-3 3H9a3 3 0 01-3-3z" /></svg>
+                                                کپی استعلام تامین‌کننده
+                                            </button>
+                                            <button 
+                                                onClick={exportPreDemandToWhatsAppCustomer}
+                                                className="flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 text-sm font-medium transition shadow-sm"
+                                            >
+                                                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-blue-500" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M18 10c0 3.866-3.582 7-8 7a8.841 8.841 0 01-4.083-.98L2 17l1.338-3.123C2.493 12.767 2 11.434 2 10c0-3.866 3.582-7 8-7s8 3.134 8 7zM7 9H5v2h2V9zm8 0h-2v2h2V9zM9 9h2v2H9V9z" clipRule="evenodd" /></svg>
+                                                کپی آفر مشتری
+                                            </button>
+                                        </div>
+                                        
+                                        <button 
+                                            onClick={convertPreDemandToActualDemand}
+                                            className="w-full md:w-auto px-6 py-2.5 bg-green-600 hover:bg-green-700 text-white rounded-lg font-bold flex items-center justify-center gap-2 transition shadow shadow-green-600/30"
+                                        >
+                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" /></svg>
+                                            تبدیل به تقاضای رسمی
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    {isModalOpen && <DemandFormModal isOpen={isModalOpen} onClose={handleCloseModal} onSave={handleSaveDemand} customers={customers} products={products} defaultStatusId={defaultStatusId} onCustomerCreated={(newCustomer) => { setCustomers(prev => [...prev, newCustomer].sort((a,b) => a.fullname.localeCompare(b.fullname))); }} customerRoleId={customerRoleId} marketingChannels={marketingChannels} provinces={provinces} initialData={demandModalInitialData} />}
                     {isEditItemModalOpen && <EditDemandItemModal isOpen={isEditItemModalOpen} onClose={handleCloseEditItemModal} onSave={handleSaveItem} onRefresh={fetchData} itemToEdit={editingItem} demand={editingDemand} demandStatuses={demandStatuses} groupedStatuses={groupedStatuses} allProfiles={customers} />}
                     {isManageItemsModalOpen && <ManageDemandItemsModal isOpen={isManageItemsModalOpen} onClose={handleCloseManageItemsModal} onSave={handleSaveManagedItems} demandToEdit={demandToManage} products={products} defaultStatusId={defaultStatusId} />}
                     <ConfirmModal isOpen={confirmState.isOpen} onClose={() => setConfirmState({ isOpen: false, onConfirm: null, message: '', title: '' })} onConfirm={confirmState.onConfirm} title={confirmState.title} message={confirmState.message} />
