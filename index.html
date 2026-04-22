@@ -706,6 +706,9 @@
             const [combinedProfileLocs, setCombinedProfileLocs] = React.useState([]);
             const [selectedCombinedLocId, setSelectedCombinedLocId] = React.useState('');
             // --- End Assignment State ---
+            
+            // --- NEW: Local State for Stock Cards ---
+            const [stockInputs, setStockInputs] = React.useState({});
 
             const isCancelled = React.useMemo(() => {
                 if (!statusId) return false;
@@ -780,6 +783,19 @@
                     setStockSuppliers([]);
                 }
             }, [itemToEdit?.product?.id]);
+
+            // Sync stockInputs when stockSuppliers changes
+            React.useEffect(() => {
+                const initialInputs = {};
+                stockSuppliers.forEach(s => {
+                    const key = `${s.supplieruserid}_${s.locationid}`;
+                    initialInputs[key] = {
+                        price: s.unitprice || '',
+                        quantity: ''
+                    };
+                });
+                setStockInputs(initialInputs);
+            }, [stockSuppliers]);
 
             React.useEffect(() => {
                 if (assignmentMode === 'new' && combinedProfileLocs.length === 0) {
@@ -884,6 +900,118 @@
                 }
             };
 
+            const handleStockCardChange = (key, field, value) => {
+                setStockInputs(prev => ({
+                    ...prev,
+                    [key]: { ...prev[key], [field]: value }
+                }));
+            };
+
+            const handleUpdateStockPrice = async (supplierId, locationId, newPrice) => {
+                if (!newPrice) {
+                    addToast("لطفا قیمت جدید را وارد کنید.", "error");
+                    return;
+                }
+                setIsAssigning(true);
+                try {
+                    const { error } = await supabaseClient
+                        .from('supplierstock')
+                        .update({ 
+                            unitprice: Number(newPrice),
+                            lastupdatedat: new Date().toISOString()
+                        })
+                        .eq('location_id', locationId)
+                        .eq('productid', itemToEdit.product.id)
+                        .eq('supplieruserid', supplierId);
+                    
+                    if (error) throw error;
+                    addToast("قیمت با موفقیت در سیستم به‌روزرسانی شد.", "success");
+                    await fetchStock(); // Refresh the list
+                } catch (e) {
+                    console.error("Error updating price:", e);
+                    addToast("خطا در به‌روزرسانی قیمت.", "error");
+                } finally {
+                    setIsAssigning(false);
+                }
+            };
+
+            const handleCardAssignment = async (supplierId, locationId, price, quantity) => {
+                if (!quantity || !price) {
+                    addToast("لطفا تعداد و قیمت را مشخص کنید.", "error");
+                    return;
+                }
+
+                setIsAssigning(true);
+                setError('');
+                try {
+                    // 1. Update the price in stock
+                    await supabaseClient
+                        .from('supplierstock')
+                        .update({ 
+                            unitprice: Number(price),
+                            lastupdatedat: new Date().toISOString()
+                        })
+                        .eq('location_id', locationId)
+                        .eq('productid', itemToEdit.product.id)
+                        .eq('supplieruserid', supplierId);
+
+                    // 2. Create Assignment
+                    const { error: assignError } = await supabaseClient.from('supplier_demand_assignment').insert({
+                        demand_item_id: itemToEdit.id,
+                        supplieruserid: supplierId,
+                        locationid: locationId || null,
+                        assigned_quantity: Number(quantity),
+                        assigned_price: Number(price)
+                    });
+
+                    if (assignError) throw assignError;
+
+                    // 3. Auto-fill the form
+                    setFormData(prev => ({
+                        ...prev,
+                        approved_supply_quantity: Number(quantity),
+                        approved_supply_price: Number(price)
+                    }));
+
+                    // 4. Auto-change status
+                    let newStatusId = statusId;
+                    const currentStatus = demandStatuses.find(s => s.id === statusId);
+                    if (!currentStatus || currentStatus.title_farsi.trim() === 'در انتظار تامین') {
+                        const targetStatus = demandStatuses.find(s => s.title_farsi.trim() === 'کالا تامین شد و منتظر تصمیم مشتری هست');
+                        if (targetStatus) {
+                            newStatusId = targetStatus.id;
+                            setStatusId(targetStatus.id);
+                        }
+                    }
+
+                    // 5. Auto-save item
+                    const { error: updateError } = await supabaseClient.from('demand_item').update({
+                        approved_supply_quantity: Number(quantity),
+                        approved_supply_price: Number(price),
+                        demandstatusid: newStatusId
+                    }).eq('id', itemToEdit.id);
+
+                    if (updateError) console.error("Error auto-updating item:", updateError);
+                    
+                    if (newStatusId !== statusId) {
+                        await supabaseClient.from('demandstatuslog').insert({ demand_item_id: itemToEdit.id, demandstatusid: newStatusId });
+                        await supabaseClient.from('demand_item_log').insert({ demand_item_id: itemToEdit.id, change_description: 'وضعیت به صورت خودکار پس از تخصیص تغییر کرد.' });
+                    }
+
+                    await fetchAssignedSuppliers();
+                    await fetchStock(); 
+                    if (typeof onRefresh === 'function') onRefresh();
+
+                    addToast("تامین‌کننده با موفقیت تخصیص یافت.", "success");
+                } catch (err) {
+                    console.error("Assignment error:", err);
+                    setError("خطا در تخصیص تامین‌کننده.");
+                } finally {
+                    setIsAssigning(false);
+                }
+            };
+
+            // This function remains for "New" assignment mode
             const handleAssignSupplier = async () => {
                 let finalSupplierId = '';
                 let finalLocationId = null;
@@ -1185,7 +1313,7 @@
                                  <div className="flex gap-4 mt-2 sm:mt-0">
                                      <label className="flex items-center gap-2 text-xs cursor-pointer text-gray-700 dark:text-gray-300">
                                          <input type="radio" name="assignmentMode" value="existing" checked={assignmentMode === 'existing'} onChange={() => setAssignmentMode('existing')} className="text-indigo-600 focus:ring-indigo-500" />
-                                         انتخاب از موجودی
+                                         بررسی و انتخاب از موجودی
                                      </label>
                                      <label className="flex items-center gap-2 text-xs cursor-pointer text-gray-700 dark:text-gray-300">
                                          <input type="radio" name="assignmentMode" value="new" checked={assignmentMode === 'new'} onChange={() => setAssignmentMode('new')} className="text-indigo-600 focus:ring-indigo-500" />
@@ -1194,60 +1322,115 @@
                                  </div>
                              </div>
 
-                             <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
-                                 {assignmentMode === 'existing' ? (
-                                     <div className="md:col-span-3">
-                                         <label className="block text-xs font-medium text-gray-600 dark:text-gray-300 mb-1">تامین‌کننده و انبار (از موجودی کالا)</label>
-                                         <select name="stockSelection" value={newAssignment.stockSelection} onChange={handleAssignmentChange} className="w-full text-sm p-2 rounded border-gray-300 bg-white dark:bg-gray-700">
-                                             <option value="">انتخاب کنید...</option>
-                                             {stockSuppliers.map(s => {
-                                                 const locId = s.locationid ? `کد ${s.locationid}` : 'بدون انبار';
-                                                 const cityName = s.location?.city?.title || '';
-                                                 const locString = cityName ? `(${cityName} - ${locId})` : `(${locId})`;
-                                                 const stockKey = `${s.supplieruserid}_${s.locationid}`;
-                                                 return (
-                                                     <option key={stockKey} value={stockKey}>
-                                                         {formatProfileName(s.profiles)} {locString} - {formatCurrency(s.unitprice)} | موجودی: {s.quantity || '?'} | {timeAgo(s.lastupdatedat) || '?'}
-                                                     </option>
-                                                 );
-                                             })}
-                                         </select>
-                                         {newAssignment.stockSelection && (() => {
-                                             const selectedStock = stockSuppliers.find(s => `${s.supplieruserid}_${s.locationid}` === newAssignment.stockSelection);
-                                             if (selectedStock) {
-                                                 const mobile = selectedStock.profiles?.mobile;
-                                                 const emergency = selectedStock.profiles?.emergencyphonenumber;
-                                                 return (
-                                                     <div className="mt-1.5 flex flex-col gap-1.5 text-[10px] font-bold text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-900/30 px-2 py-1.5 rounded border border-indigo-100 dark:border-indigo-800">
-                                                         <div className="flex justify-between items-center w-full">
-                                                             <span>موجودی فعلی: {selectedStock.quantity || 'نامشخص'}</span>
-                                                             <span>بروزرسانی: {timeAgo(selectedStock.lastupdatedat) || 'نامشخص'}</span>
+                             {assignmentMode === 'existing' ? (
+                                 <div className="flex flex-col gap-4 mb-2 max-h-96 overflow-y-auto pr-2">
+                                     {stockSuppliers.length === 0 ? (
+                                         <div className="text-sm text-yellow-600 p-3 bg-yellow-50 dark:bg-yellow-900/30 rounded border border-yellow-200 dark:border-yellow-700">هیچ تامین‌کننده‌ای موجودی این کالا را در سیستم ثبت نکرده است.</div>
+                                     ) : (
+                                         stockSuppliers.map(s => {
+                                             const locId = s.locationid || 'null';
+                                             const key = `${s.supplieruserid}_${locId}`;
+                                             const inputs = stockInputs[key] || { price: s.unitprice || '', quantity: '' };
+                                             const cityName = s.location?.city?.title || 'بدون شهر';
+                                             const locString = `${cityName} - کد انبار ${locId}`;
+                                             
+                                             const contactText = `نام: ${formatProfileName(s.profiles)}\nتلفن: ${s.profiles?.mobile || ''} ${s.profiles?.emergencyphonenumber || ''}\nمحصول: ${itemToEdit.product.title}`;
+
+                                             return (
+                                                 <div key={key} className="bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-xl p-4 shadow-sm hover:shadow-md transition-shadow flex flex-col gap-4">
+                                                     {/* Header */}
+                                                     <div className="flex justify-between items-center border-b border-gray-100 dark:border-gray-700 pb-2">
+                                                         <div className="font-bold text-gray-800 dark:text-gray-200">
+                                                             {formatProfileName(s.profiles)} <span className="text-sm font-normal text-gray-500 dark:text-gray-400">({locString})</span>
                                                          </div>
-                                                         {(mobile || emergency) && (
-                                                             <div className="flex flex-wrap items-center gap-3 border-t border-indigo-200 dark:border-indigo-700/50 pt-1.5">
-                                                                 <span className="text-indigo-600/80 dark:text-indigo-400/80">تلفن‌ها:</span>
-                                                                 {mobile && (
-                                                                     <a href={`tel:${mobile}`} className="hover:underline flex items-center gap-1 font-mono text-indigo-800 dark:text-indigo-200" dir="ltr">
-                                                                         <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor"><path d="M2 3a1 1 0 011-1h2.153a1 1 0 01.986.836l.74 4.435a1 1 0 01-.54 1.06l-1.548.773a11.037 11.037 0 006.105 6.105l.774-1.548a1 1 0 011.059-.54l4.435.74a1 1 0 01.836.986V17a1 1 0 01-1 1h-2C7.82 18 2 12.18 2 5V3z" /></svg>
-                                                                         {mobile}
-                                                                     </a>
-                                                                 )}
-                                                                 {emergency && (
-                                                                     <a href={`tel:${emergency}`} className="hover:underline flex items-center gap-1 font-mono text-indigo-800 dark:text-indigo-200" dir="ltr">
-                                                                         <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor"><path d="M2 3a1 1 0 011-1h2.153a1 1 0 01.986.836l.74 4.435a1 1 0 01-.54 1.06l-1.548.773a11.037 11.037 0 006.105 6.105l.774-1.548a1 1 0 011.059-.54l4.435.74a1 1 0 01.836.986V17a1 1 0 01-1 1h-2C7.82 18 2 12.18 2 5V3z" /></svg>
-                                                                         {emergency}
-                                                                     </a>
-                                                                 )}
-                                                             </div>
-                                                         )}
                                                      </div>
-                                                 );
-                                             }
-                                             return null;
-                                         })()}
-                                         {stockSuppliers.length === 0 && <p className="text-xs text-yellow-600 mt-1">هیچ تامین‌کننده‌ای موجودی این کالا را ندارد.</p>}
-                                     </div>
-                                 ) : (
+
+                                                     {/* Body */}
+                                                     <div className="flex flex-col lg:flex-row gap-6 items-start lg:items-center">
+                                                         
+                                                         {/* Info Block */}
+                                                         <div className="w-full lg:w-auto bg-gray-50 dark:bg-gray-700/50 p-3 rounded-lg text-sm space-y-1.5 min-w-[200px]">
+                                                             <div className="flex justify-between">
+                                                                 <span className="text-gray-500 dark:text-gray-400">قیمت اصلی:</span>
+                                                                 <span className="font-mono font-semibold text-gray-800 dark:text-gray-200">{formatCurrency(s.unitprice)}</span>
+                                                             </div>
+                                                             <div className="flex justify-between">
+                                                                 <span className="text-gray-500 dark:text-gray-400">تاریخ بروزرسانی:</span>
+                                                                 <span className="text-gray-700 dark:text-gray-300">{formatDateTime(s.lastupdatedat, false)} <span className="text-[10px] text-gray-400">({timeAgo(s.lastupdatedat)})</span></span>
+                                                             </div>
+                                                             <div className="flex justify-between">
+                                                                 <span className="text-gray-500 dark:text-gray-400">موجودی انبار:</span>
+                                                                 <span className="font-mono font-bold text-indigo-600 dark:text-indigo-400">{s.quantity || '?'}</span>
+                                                             </div>
+                                                         </div>
+
+                                                         {/* Inputs */}
+                                                         <div className="flex-1 w-full grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                                             <div>
+                                                                 <label className="block text-xs font-medium text-gray-600 dark:text-gray-300 mb-1 text-center">قیمت جدید (تومان)</label>
+                                                                 <input 
+                                                                     type="number" 
+                                                                     value={inputs.price} 
+                                                                     onChange={e => handleStockCardChange(key, 'price', e.target.value)} 
+                                                                     className="w-full text-center text-sm p-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 font-mono font-bold text-gray-800 dark:text-white" 
+                                                                 />
+                                                                 <button 
+                                                                     type="button" 
+                                                                     onClick={() => handleUpdateStockPrice(s.supplieruserid, locId, inputs.price)}
+                                                                     disabled={isAssigning}
+                                                                     className="w-full mt-2 text-xs bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 py-1.5 rounded transition"
+                                                                 >
+                                                                     فقط بروزرسانی قیمت
+                                                                 </button>
+                                                             </div>
+                                                             <div>
+                                                                 <label className="block text-xs font-medium text-gray-600 dark:text-gray-300 mb-1 text-center">تعداد تخصیص</label>
+                                                                 <input 
+                                                                     type="number" 
+                                                                     value={inputs.quantity} 
+                                                                     onChange={e => handleStockCardChange(key, 'quantity', e.target.value)} 
+                                                                     className="w-full text-center text-sm p-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 font-mono font-bold text-gray-800 dark:text-white" 
+                                                                 />
+                                                                 <button 
+                                                                     type="button" 
+                                                                     onClick={() => handleCardAssignment(s.supplieruserid, locId, inputs.price, inputs.quantity)}
+                                                                     disabled={isAssigning}
+                                                                     className="w-full mt-2 text-xs bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-1.5 rounded transition disabled:bg-indigo-400"
+                                                                 >
+                                                                     ثبت تخصیص
+                                                                 </button>
+                                                             </div>
+                                                         </div>
+
+                                                         {/* Action Buttons */}
+                                                         <div className="flex lg:flex-col gap-2 w-full lg:w-auto justify-center">
+                                                             {s.profiles?.mobile && (
+                                                                 <a href={`https://wa.me/98${s.profiles.mobile.startsWith('0') ? s.profiles.mobile.substring(1) : s.profiles.mobile}`} target="_blank" rel="noreferrer" className="bg-green-500 hover:bg-green-600 text-white p-2.5 rounded-full flex items-center justify-center transition" title="واتساپ">
+                                                                     <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" viewBox="0 0 16 16">
+                                                                         <path d="M13.601 2.326A7.854 7.854 0 0 0 7.994 0C3.627 0 .068 3.558.064 7.926c0 1.399.366 2.76 1.057 3.965L0 16l4.204-1.102a7.933 7.933 0 0 0 3.79.965h.004c4.368 0 7.926-3.558 7.93-7.93A7.898 7.898 0 0 0 13.6 2.326zM7.994 14.521a6.573 6.573 0 0 1-3.356-.92l-.24-.144-2.494.654.666-2.433-.156-.251a6.56 6.56 0 0 1-1.007-3.505c0-3.626 2.957-6.584 6.591-6.584a6.56 6.56 0 0 1 4.66 1.931 6.557 6.557 0 0 1 1.928 4.66c-.004 3.639-2.961 6.592-6.592 6.592zm3.615-4.934c-.197-.099-1.17-.578-1.353-.646-.182-.065-.315-.099-.445.099-.133.197-.513.646-.627.775-.114.133-.232.148-.43.05-.197-.1-.836-.308-1.592-.985-.59-.525-.985-1.175-1.103-1.372-.114-.198-.011-.304.088-.403.087-.088.197-.232.296-.346.1-.114.133-.198.198-.33.065-.134.034-.248-.015-.347-.05-.099-.445-1.076-.612-1.47-.16-.389-.323-.335-.445-.34-.114-.007-.247-.007-.38-.007a.729.729 0 0 0-.529.247c-.182.198-.691.677-.691 1.654 0 .977.71 1.916.81 2.049.098.133 1.394 2.132 3.383 2.992.47.205.84.326 1.129.418.475.152.904.129 1.246.08.38-.058 1.171-.48 1.338-.943.164-.464.164-.86.114-.943-.049-.084-.182-.133-.38-.232z"/>
+                                                                     </svg>
+                                                                 </a>
+                                                             )}
+                                                             <button 
+                                                                 type="button" 
+                                                                 onClick={() => {
+                                                                     navigator.clipboard.writeText(contactText);
+                                                                     addToast("اطلاعات کپی شد", "success");
+                                                                 }} 
+                                                                 className="bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 p-2.5 rounded-full flex items-center justify-center transition" 
+                                                                 title="کپی اطلاعات"
+                                                             >
+                                                                 <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
+                                                             </button>
+                                                         </div>
+                                                     </div>
+                                                 </div>
+                                             );
+                                         })
+                                     )}
+                                 </div>
+                             ) : (
+                                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
                                      <div className="md:col-span-3 grid grid-cols-1 sm:grid-cols-2 gap-3 bg-indigo-50/50 dark:bg-indigo-900/10 p-3 rounded border border-indigo-100 dark:border-indigo-800/30 mb-1">
                                          <div>
                                              <label className="block text-xs font-medium text-gray-600 dark:text-gray-300 mb-1 flex justify-between">
@@ -1284,20 +1467,22 @@
                                               />
                                          </div>
                                      </div>
-                                 )}
 
-                                 <div className="md:col-span-1">
-                                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-300 mb-1">تعداد تخصیص</label>
-                                      <input type="number" name="quantity" value={newAssignment.quantity} onChange={handleAssignmentChange} className="w-full text-sm p-2 rounded border-gray-300 bg-white dark:bg-gray-700" placeholder="تعداد" />
+                                     <div className="md:col-span-1">
+                                          <label className="block text-xs font-medium text-gray-600 dark:text-gray-300 mb-1">تعداد تخصیص</label>
+                                          <input type="number" name="quantity" value={newAssignment.quantity} onChange={handleAssignmentChange} className="w-full text-sm p-2 rounded border-gray-300 bg-white dark:bg-gray-700" placeholder="تعداد" />
+                                     </div>
+                                     <div className="md:col-span-2">
+                                          <label className="block text-xs font-medium text-gray-600 dark:text-gray-300 mb-1">قیمت واحد (تومان)</label>
+                                          <input type="number" name="price" value={newAssignment.price} onChange={handleAssignmentChange} className="w-full text-sm p-2 rounded border-gray-300 bg-white dark:bg-gray-700" placeholder="قیمت" />
+                                     </div>
+                                     <div className="md:col-span-3">
+                                         <button type="button" onClick={handleAssignSupplier} disabled={isAssigning} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold py-2 px-4 rounded transition disabled:bg-indigo-400">
+                                             {isAssigning ? 'در حال تخصیص...' : '+ افزودن تخصیص'}
+                                         </button>
+                                     </div>
                                  </div>
-                                 <div className="md:col-span-2">
-                                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-300 mb-1">قیمت واحد (تومان)</label>
-                                      <input type="number" name="price" value={newAssignment.price} onChange={handleAssignmentChange} className="w-full text-sm p-2 rounded border-gray-300 bg-white dark:bg-gray-700" placeholder="قیمت" />
-                                 </div>
-                             </div>
-                             <button type="button" onClick={handleAssignSupplier} disabled={isAssigning} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold py-2 px-4 rounded transition disabled:bg-indigo-400">
-                                 {isAssigning ? 'در حال تخصیص...' : '+ افزودن تخصیص'}
-                             </button>
+                             )}
                         </div>
                     </div>
 
