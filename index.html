@@ -1375,10 +1375,29 @@
                                              return (
                                                  <div key={key} className="bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-xl p-4 shadow-sm hover:shadow-md transition-shadow flex flex-col gap-4">
                                                      {/* Header */}
-                                                     <div className="flex justify-between items-center border-b border-gray-100 dark:border-gray-700 pb-2">
-                                                         <div className="font-bold text-gray-800 dark:text-gray-200">
-                                                             {formatProfileName(s.profiles)} <span className="text-sm font-normal text-gray-500 dark:text-gray-400">({locString})</span>
+                                                     <div className="flex flex-col gap-2 border-b border-gray-100 dark:border-gray-700 pb-3">
+                                                         <div className="flex justify-between items-center">
+                                                             <div className="font-bold text-gray-800 dark:text-gray-200">
+                                                                 {formatProfileName(s.profiles)} <span className="text-sm font-normal text-gray-500 dark:text-gray-400">({locString})</span>
+                                                             </div>
                                                          </div>
+                                                         {/* نمایش و قابلیت کلیک روی شماره تماس‌های تامین‌کننده */}
+                                                         {(s.profiles?.mobile || s.profiles?.emergencyphonenumber) && (
+                                                             <div className="flex flex-wrap gap-2">
+                                                                 {s.profiles?.mobile && (
+                                                                     <a href={`tel:${s.profiles.mobile}`} className="flex items-center gap-1.5 text-xs font-mono tracking-wider text-indigo-700 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/30 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 px-2.5 py-1.5 rounded-md transition-colors border border-indigo-200 dark:border-indigo-800/50" dir="ltr" title="تماس با موبایل">
+                                                                         <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor"><path d="M2 3a1 1 0 011-1h2.153a1 1 0 01.986.836l.74 4.435a1 1 0 01-.54 1.06l-1.548.773a11.037 11.037 0 006.105 6.105l.774-1.548a1 1 0 011.059-.54l4.435.74a1 1 0 01.836.986V17a1 1 0 01-1 1h-2C7.82 18 2 12.18 2 5V3z" /></svg>
+                                                                         {s.profiles.mobile}
+                                                                     </a>
+                                                                 )}
+                                                                 {s.profiles?.emergencyphonenumber && (
+                                                                     <a href={`tel:${s.profiles.emergencyphonenumber}`} className="flex items-center gap-1.5 text-xs font-mono tracking-wider text-indigo-700 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/30 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 px-2.5 py-1.5 rounded-md transition-colors border border-indigo-200 dark:border-indigo-800/50" dir="ltr" title="تماس با شماره دوم">
+                                                                         <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor"><path d="M2 3a1 1 0 011-1h2.153a1 1 0 01.986.836l.74 4.435a1 1 0 01-.54 1.06l-1.548.773a11.037 11.037 0 006.105 6.105l.774-1.548a1 1 0 011.059-.54l4.435.74a1 1 0 01.836.986V17a1 1 0 01-1 1h-2C7.82 18 2 12.18 2 5V3z" /></svg>
+                                                                         {s.profiles.emergencyphonenumber}
+                                                                     </a>
+                                                                 )}
+                                                             </div>
+                                                         )}
                                                      </div>
 
                                                      {/* Body */}
