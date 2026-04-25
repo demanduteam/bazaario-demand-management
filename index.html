@@ -198,6 +198,9 @@
                 );
             }, [options, searchTerm]);
 
+            // بهینه‌سازی: محدود کردن تعداد آیتم‌های نمایشی به 30 مورد برای جلوگیری از فریز شدن صفحه در رندر 10,000 گره DOM
+            const displayOptions = filteredOptions.slice(0, 30);
+
             React.useEffect(() => {
                 function handleClickOutside(event) {
                     if (wrapperRef.current && !wrapperRef.current.contains(event.target)) {
@@ -224,22 +227,37 @@
                         onChange={e => setSearchTerm(e.target.value)}
                         onFocus={() => setIsOpen(true)}
                         disabled={disabled}
-                        className="w-full bg-gray-100 dark:bg-gray-700 p-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                        className="w-full bg-gray-100 dark:bg-gray-700 p-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm disabled:opacity-60"
                     />
                     {isOpen && !disabled && (
                         <div className="absolute z-10 w-full mt-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg shadow-lg max-h-60 overflow-y-auto">
-                            {filteredOptions.length > 0 ? (
-                                filteredOptions.map(option => (
-                                    <div
-                                        key={option.id}
-                                        onClick={() => handleSelect(option)}
-                                        className="p-2 hover:bg-indigo-100 dark:hover:bg-indigo-800 cursor-pointer"
-                                    >
-                                        {option.title}
-                                    </div>
-                                ))
+                            {displayOptions.length > 0 ? (
+                                <>
+                                    {displayOptions.map(option => (
+                                        <div
+                                            key={option.id}
+                                            onClick={() => handleSelect(option)}
+                                            className="p-2 hover:bg-indigo-50 dark:hover:bg-indigo-900/40 cursor-pointer flex items-center gap-3 border-b border-gray-50 dark:border-gray-700/50 last:border-0"
+                                        >
+                                            {/* نمایش و لود تنبل تصویر در جستجو */}
+                                            {option.image !== undefined && (
+                                                option.image ? (
+                                                    <img src={option.image} alt={option.title} loading="lazy" className="w-12 h-12 rounded object-cover border border-gray-200 dark:border-gray-600 bg-white" />
+                                                ) : (
+                                                    <div className="w-12 h-12 rounded bg-gray-100 dark:bg-gray-700 flex items-center justify-center text-[10px] text-gray-400 border border-gray-200 dark:border-gray-600">بدون عکس</div>
+                                                )
+                                            )}
+                                            <div className="flex-1 text-sm">{option.title}</div>
+                                        </div>
+                                    ))}
+                                    {filteredOptions.length > 30 && (
+                                        <div className="p-2 text-xs text-center text-gray-500 bg-gray-50 dark:bg-gray-800 border-t border-gray-100 dark:border-gray-700">
+                                            نتایج بیشتر پنهان شدند. لطفا دقیق‌تر جستجو کنید.
+                                        </div>
+                                    )}
+                                </>
                             ) : (
-                                <div className="p-2 text-gray-500">موردی یافت نشد.</div>
+                                <div className="p-3 text-sm text-gray-500 text-center">موردی یافت نشد.</div>
                             )}
                         </div>
                     )}
@@ -367,6 +385,7 @@
                                 <label className="block text-sm font-medium mb-1">کانال جذب</label>
                                 <select name="marketingchannelid" value={formData.marketingchannelid} onChange={handleChange} className="w-full bg-gray-100 dark:bg-gray-700 p-2 rounded-lg focus:ring-2 focus:ring-indigo-500">
                                     <option value="">انتخاب کانال...</option>
+                                    <option value="">کانال نامشخص</option>
                                     {marketingChannels.map(c => <option key={c.id} value={c.id}>{c.title}</option>)}
                                 </select>
                             </div>
@@ -402,11 +421,11 @@
             );
         };
 
-        const DemandFormModal = ({ isOpen, onClose, onSave, customers, products, defaultStatusId, onCustomerCreated, customerRoleId, marketingChannels, provinces, initialData }) => {
+        const DemandFormModal = ({ isOpen, onClose, onSave, customers, products, defaultStatusId, onCustomerCreated, customerRoleId, marketingChannels, provinces, initialData, isProductsLoading }) => {
             const [customerId, setCustomerId] = React.useState('');
             const [deadline, setDeadline] = React.useState('');
             const [isEmergency, setIsEmergency] = React.useState(false);
-            const [items, setItems] = [{ productid: '', quantity: '', demand_admin_note: '', supply_admin_note: '', key: crypto.randomUUID() }];
+            const [items, setItems] = React.useState([{ productid: '', quantity: '', demand_admin_note: '', supply_admin_note: '', key: crypto.randomUUID() }]);
             const [error, setError] = React.useState('');
             const [isLoading, setIsLoading] = React.useState(false);
             const [supplierPrices, setSupplierPrices] = React.useState({});
@@ -581,7 +600,8 @@
                 );
                 const telegramCode = telegramCodeProp ? telegramCodeProp.value : '';
                 const displayTitle = `(ID: ${p.id}) ${telegramCode ? `[${telegramCode}] ` : ''}${p.brand ? p.brand.title + ' ' : ''}${p.title}`;
-                return { id: p.id, title: displayTitle };
+                // ارسال تصویر به Select
+                return { id: p.id, title: displayTitle, image: p.image_url };
             });
 
             return (
@@ -599,7 +619,7 @@
                             </div>
                             <div>
                                 <label className="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">مهلت تحویل (اختیاری)</label>
-                                <input type="date" value={deadline} onChange={e => setDeadline(e.target.value)} className="w-full bg-gray-100 dark:bg-gray-700 p-2 rounded-lg" />
+                                <input type="date" value={deadline} onChange={e => setDeadline(e.target.value)} className="w-full bg-gray-100 dark:bg-gray-700 p-2 rounded-lg text-sm" />
                             </div>
                         </div>
                         
@@ -612,7 +632,7 @@
                         {customerId && !isFetchingLocations && customerLocations.length > 0 && (
                              <div>
                                 <label className="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">آدرس تحویل</label>
-                                <select value={locationId} onChange={e => setLocationId(e.target.value)} className="w-full bg-gray-100 dark:bg-gray-700 p-2 rounded-lg" required>
+                                <select value={locationId} onChange={e => setLocationId(e.target.value)} className="w-full bg-gray-100 dark:bg-gray-700 p-2 rounded-lg text-sm" required>
                                     <option value="" disabled>یک آدرس را انتخاب کنید...</option>
                                     {customerLocations.map(loc => {
                                         const fullAddress = `${loc.city?.province?.title || ''}, ${loc.city?.title || ''}, ${loc.address || ''}`;
@@ -628,7 +648,10 @@
                         )}
 
                         <div className="border-t border-gray-200 dark:border-gray-700 pt-4">
-                            <h3 className="text-lg font-semibold mb-2">اقلام درخواستی</h3>
+                            <h3 className="text-lg font-semibold mb-2 flex items-center gap-2">
+                                اقلام درخواستی 
+                                {isProductsLoading && <span className="text-xs font-normal text-indigo-500 bg-indigo-50 dark:bg-indigo-900/40 px-2 py-0.5 rounded-full flex items-center gap-1"><span className="spinner w-3 h-3 border-[1.5px] border-indigo-500 m-0"></span> در حال دریافت اطلاعات محصولات...</span>}
+                            </h3>
                             <div className="space-y-3">
                                 {items.map((item, index) => {
                                     const prices = supplierPrices[item.productid] || [];
@@ -641,32 +664,48 @@
                                     }
                                     return (
                                         <div key={item.key} className="p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg border border-gray-100 dark:border-gray-700">
-                                            <div className="grid grid-cols-1 md:grid-cols-5 items-end gap-x-4 gap-y-2">
-                                                <div className="md:col-span-3">
-                                                    <label className="text-xs text-gray-500 dark:text-gray-400">محصول</label>
-                                                    <SearchableSelect options={productOptions} value={item.productid} onChange={(id) => handleItemChange(index, 'productid', id)} placeholder="جستجوی محصول با نام یا کد..." />
+                                            <div className="grid grid-cols-1 md:grid-cols-5 items-end gap-x-4 gap-y-3">
+                                                <div className="md:col-span-3 flex gap-3 items-end">
+                                                    {/* نمایش عکس کالا کنار سلکتور با لود تنبل و سایز بزرگتر */}
+                                                    {selectedProduct && (
+                                                        selectedProduct.image_url ? (
+                                                            <img src={selectedProduct.image_url} alt="" loading="lazy" className="w-16 h-16 rounded-lg object-cover border border-gray-300 dark:border-gray-600 shadow-sm" />
+                                                        ) : (
+                                                            <div className="w-16 h-16 rounded-lg bg-gray-100 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 flex items-center justify-center text-xs text-gray-400 shadow-sm">بدون عکس</div>
+                                                        )
+                                                    )}
+                                                    <div className="flex-1">
+                                                        <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">محصول</label>
+                                                        <SearchableSelect 
+                                                            options={productOptions} 
+                                                            value={item.productid} 
+                                                            onChange={(id) => handleItemChange(index, 'productid', id)} 
+                                                            placeholder={isProductsLoading ? "درحال بارگذاری لیست محصولات..." : "جستجوی محصول با نام یا کد..."}
+                                                            disabled={isProductsLoading}
+                                                        />
+                                                    </div>
                                                 </div>
                                                 <div className="md:col-span-1">
-                                                    <label className="text-xs text-gray-500 dark:text-gray-400">تعداد</label>
-                                                    <input type="number" value={item.quantity} onChange={(e) => handleItemChange(index, 'quantity', e.target.value)} className="w-full bg-white dark:bg-gray-600 p-2 rounded-lg" placeholder="تعداد" min="1" required />
+                                                    <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">تعداد</label>
+                                                    <input type="number" value={item.quantity} onChange={(e) => handleItemChange(index, 'quantity', e.target.value)} className="w-full bg-white dark:bg-gray-600 p-2 rounded-lg text-sm border border-transparent focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500" placeholder="تعداد" min="1" required />
                                                 </div>
-                                                <div className="flex justify-end"><button type="button" onClick={() => handleRemoveItem(index)} className="text-red-500 hover:text-red-700 p-2">✕</button></div>
+                                                <div className="flex justify-end"><button type="button" onClick={() => handleRemoveItem(index)} className="text-red-500 hover:text-red-700 p-2 mb-1">✕</button></div>
                                             </div>
-                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-2">
-                                                <textarea value={item.demand_admin_note} onChange={(e) => handleItemChange(index, 'demand_admin_note', e.target.value)} placeholder="یادداشت مدیر تقاضا..." className="w-full text-sm bg-white dark:bg-gray-600 p-2 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500" rows="2"></textarea>
-                                                <textarea value={item.supply_admin_note} onChange={(e) => handleItemChange(index, 'supply_admin_note', e.target.value)} placeholder="یادداشت مدیر تامین..." className="w-full text-sm bg-white dark:bg-gray-600 p-2 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500" rows="2"></textarea>
+                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-3">
+                                                <textarea value={item.demand_admin_note} onChange={(e) => handleItemChange(index, 'demand_admin_note', e.target.value)} placeholder="یادداشت مدیر تقاضا..." className="w-full text-sm bg-white dark:bg-gray-600 p-2 rounded-lg border border-transparent focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500" rows="2"></textarea>
+                                                <textarea value={item.supply_admin_note} onChange={(e) => handleItemChange(index, 'supply_admin_note', e.target.value)} placeholder="یادداشت مدیر تامین..." className="w-full text-sm bg-white dark:bg-gray-600 p-2 rounded-lg border border-transparent focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500" rows="2"></textarea>
                                             </div>
                                             {prices.length > 0 && (
-                                                <div className="mt-2 pt-2 border-t border-gray-200 dark:border-gray-600">
-                                                    <h4 className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1">قیمت‌های تامین‌کنندگان:</h4>
+                                                <div className="mt-3 pt-3 border-t border-gray-200 dark:border-gray-600">
+                                                    <h4 className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-2">قیمت‌های تامین‌کنندگان:</h4>
                                                     <div className="flex flex-wrap gap-2">
                                                         {prices.map((price, idx) => ( <div key={idx} className="bg-gray-200 dark:bg-gray-600 text-xs px-2 py-1 rounded-full"><span className="font-semibold">{price.profiles.fullname}:</span> {formatCurrency(price.unitprice)}</div> ))}
                                                     </div>
                                                 </div>
                                             )}
                                             {productProperties.length > 0 && (
-                                                <div className="mt-2 pt-2 border-t border-gray-200 dark:border-gray-600">
-                                                    <h4 className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1">ویژگی‌های محصول:</h4>
+                                                <div className="mt-3 pt-3 border-t border-gray-200 dark:border-gray-600">
+                                                    <h4 className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-2">ویژگی‌های محصول:</h4>
                                                     <div className="flex flex-wrap gap-2">
                                                         {productProperties.map(prop => ( <div key={prop.title} className="bg-gray-200 dark:bg-gray-600 text-xs px-2 py-1 rounded-full"><span className="font-semibold">{prop.title}:</span> {prop.value}</div> ))}
                                                     </div>
@@ -1257,10 +1296,15 @@
 
             return (
                 <Modal isOpen={isOpen} onClose={onClose} title={`ویرایش آیتم: ${itemToEdit.product.title}`}>
-                    <div className="p-4 mb-4 bg-indigo-100 dark:bg-indigo-900/50 rounded-lg grid grid-cols-2 md:grid-cols-3 gap-4 text-sm text-gray-800 dark:text-gray-200">
-                        <div><span className="font-semibold text-gray-600 dark:text-gray-400">مشتری:</span> {formatProfileName(demand.profiles)}</div>
-                        <div><span className="font-semibold text-gray-600 dark:text-gray-400">شهر:</span> {demand.location?.city?.title || '-'}</div>
-                        <div><span className="font-semibold text-gray-600 dark:text-gray-400">برند:</span> {itemToEdit.product.brand?.title || '-'}</div>
+                    <div className="p-4 mb-4 bg-indigo-100 dark:bg-indigo-900/50 rounded-lg flex flex-col md:flex-row items-center gap-4 text-sm text-gray-800 dark:text-gray-200">
+                         {itemToEdit.product.image_url && (
+                             <img src={itemToEdit.product.image_url} alt="" loading="lazy" className="w-20 h-20 md:w-24 md:h-24 rounded-lg object-cover border border-indigo-200 dark:border-indigo-700 shadow-sm hover:scale-110 transition-transform duration-300" />
+                         )}
+                         <div className="grid grid-cols-2 md:grid-cols-3 gap-4 flex-1 w-full text-right">
+                            <div><span className="font-semibold text-gray-600 dark:text-gray-400">مشتری:</span> {formatProfileName(demand.profiles)}</div>
+                            <div><span className="font-semibold text-gray-600 dark:text-gray-400">شهر:</span> {demand.location?.city?.title || '-'}</div>
+                            <div><span className="font-semibold text-gray-600 dark:text-gray-400">برند:</span> {itemToEdit.product.brand?.title || '-'}</div>
+                         </div>
                     </div>
                     
                     {/* --- Assignment Section --- */}
@@ -1603,7 +1647,7 @@
             );
         };
 
-        const ManageDemandItemsModal = ({ isOpen, onClose, onSave, demandToEdit, products, defaultStatusId }) => {
+        const ManageDemandItemsModal = ({ isOpen, onClose, onSave, demandToEdit, products, defaultStatusId, isProductsLoading }) => {
             const [items, setItems] = React.useState([]);
             const [originalItemIds, setOriginalItemIds] = React.useState(new Set());
             const [error, setError] = React.useState('');
@@ -1614,7 +1658,7 @@
                 if (demandToEdit) {
                     const initialItems = demandToEdit.demand_item.map(item => ({ 
                         ...item, 
-                        productid: item.product.id, // Ensure productid is set for the select
+                        productid: item.product?.id, // Ensure productid is set for the select safely
                         key: crypto.randomUUID() 
                     }));
                     setItems(initialItems);
@@ -1721,7 +1765,8 @@
                  );
                  const telegramCode = telegramCodeProp ? telegramCodeProp.value : '';
                  const displayTitle = `(ID: ${p.id}) ${telegramCode ? `[${telegramCode}] ` : ''}${p.brand ? p.brand.title + ' ' : ''}${p.title}`;
-                 return { id: p.id, title: displayTitle };
+                 // ارسال تصویر به Select
+                 return { id: p.id, title: displayTitle, image: p.image_url };
              });
 
             return (
@@ -1738,27 +1783,48 @@
                         </div>
                         
                         <div className="border-t border-gray-200 dark:border-gray-700 pt-4">
-                            <h3 className="text-lg font-semibold mb-2">اقلام درخواستی</h3>
+                            <h3 className="text-lg font-semibold mb-2 flex items-center gap-2">
+                                اقلام درخواستی
+                                {isProductsLoading && <span className="text-xs font-normal text-indigo-500 bg-indigo-50 dark:bg-indigo-900/40 px-2 py-0.5 rounded-full flex items-center gap-1"><span className="spinner w-3 h-3 border-[1.5px] border-indigo-500 m-0"></span> در حال دریافت اطلاعات محصولات...</span>}
+                            </h3>
                             <div className="space-y-3">
-                                {items.map((item, index) => (
+                                {items.map((item, index) => {
+                                    const selectedProduct = products.find(p => p.id === item.productid);
+                                    return (
                                     <div key={item.key} className="p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg border border-gray-100 dark:border-gray-700">
-                                        <div className="grid grid-cols-1 md:grid-cols-5 items-end gap-x-4 gap-y-2">
-                                            <div className="md:col-span-3">
-                                                <label className="text-xs text-gray-500 dark:text-gray-400">محصول</label>
-                                                <SearchableSelect options={productOptions} value={item.productid} onChange={(id) => handleItemChange(index, 'productid', id)} placeholder="جستجوی محصول با نام یا کد..." />
+                                        <div className="grid grid-cols-1 md:grid-cols-5 items-end gap-x-4 gap-y-3">
+                                            <div className="md:col-span-3 flex gap-3 items-end">
+                                                {/* نمایش عکس کالا کنار سلکتور */}
+                                                {selectedProduct && (
+                                                    selectedProduct.image_url ? (
+                                                        <img src={selectedProduct.image_url} alt="" loading="lazy" className="w-16 h-16 rounded-lg object-cover border border-gray-300 dark:border-gray-600 shadow-sm hover:scale-110 transition-transform duration-300" />
+                                                    ) : (
+                                                        <div className="w-16 h-16 rounded-lg bg-gray-100 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 flex items-center justify-center text-xs text-gray-400 shadow-sm">بدون عکس</div>
+                                                    )
+                                                )}
+                                                <div className="flex-1">
+                                                    <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">محصول</label>
+                                                    <SearchableSelect 
+                                                        options={productOptions} 
+                                                        value={item.productid} 
+                                                        onChange={(id) => handleItemChange(index, 'productid', id)} 
+                                                        placeholder={isProductsLoading ? "درحال بارگذاری لیست محصولات..." : "جستجوی محصول با نام یا کد..."}
+                                                        disabled={isProductsLoading}
+                                                    />
+                                                </div>
                                             </div>
                                             <div className="md:col-span-1">
-                                                <label className="text-xs text-gray-500 dark:text-gray-400">تعداد</label>
-                                                <input type="number" value={item.quantity} onChange={(e) => handleItemChange(index, 'quantity', e.target.value)} className="w-full bg-white dark:bg-gray-600 p-2 rounded-lg" placeholder="تعداد" min="1" required />
+                                                <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">تعداد</label>
+                                                <input type="number" value={item.quantity} onChange={(e) => handleItemChange(index, 'quantity', e.target.value)} className="w-full bg-white dark:bg-gray-600 p-2 rounded-lg text-sm border border-transparent focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500" placeholder="تعداد" min="1" required />
                                             </div>
-                                            <div className="flex justify-end"><button type="button" onClick={() => handleRemoveItem(index)} className="text-red-500 hover:text-red-700 p-2">✕</button></div>
+                                            <div className="flex justify-end"><button type="button" onClick={() => handleRemoveItem(index)} className="text-red-500 hover:text-red-700 p-2 mb-1">✕</button></div>
                                         </div>
-                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-2">
-                                            <textarea value={item.demand_admin_note || ''} onChange={(e) => handleItemChange(index, 'demand_admin_note', e.target.value)} placeholder="یادداشت مدیر تقاضا..." className="w-full text-sm bg-white dark:bg-gray-600 p-2 rounded-lg" rows="2"></textarea>
-                                            <textarea value={item.supply_admin_note || ''} onChange={(e) => handleItemChange(index, 'supply_admin_note', e.target.value)} placeholder="یادداشت مدیر تامین..." className="w-full text-sm bg-white dark:bg-gray-600 p-2 rounded-lg" rows="2"></textarea>
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-3">
+                                            <textarea value={item.demand_admin_note || ''} onChange={(e) => handleItemChange(index, 'demand_admin_note', e.target.value)} placeholder="یادداشت مدیر تقاضا..." className="w-full text-sm bg-white dark:bg-gray-600 p-2 rounded-lg border border-transparent focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500" rows="2"></textarea>
+                                            <textarea value={item.supply_admin_note || ''} onChange={(e) => handleItemChange(index, 'supply_admin_note', e.target.value)} placeholder="یادداشت مدیر تامین..." className="w-full text-sm bg-white dark:bg-gray-600 p-2 rounded-lg border border-transparent focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500" rows="2"></textarea>
                                         </div>
                                     </div>
-                                ))}
+                                )})}
                             </div>
                             <button type="button" onClick={handleAddItem} className="mt-4 w-full text-center py-2 px-4 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition font-semibold">+ افزودن کالا</button>
                         </div>
@@ -1825,6 +1891,8 @@
             const [activeTab, setActiveTab] = React.useState('demands'); // 'demands' or 'retargeting'
             const [demands, setDemands] = React.useState([]);
             const [isLoading, setIsLoading] = React.useState(true);
+            const [isBasicRefLoading, setIsBasicRefLoading] = React.useState(true); // NEW: Fast load state
+            const [isProductsLoading, setIsProductsLoading] = React.useState(true); // NEW: Slow load state
             const [error, setError] = React.useState('');
             const [isModalOpen, setIsModalOpen] = React.useState(false);
             const [isEditItemModalOpen, setIsEditItemModalOpen] = React.useState(false); 
@@ -1863,11 +1931,16 @@
 
             const [countdown, setCountdown] = React.useState(300); // 5 minutes in seconds
             const [searchTerm, setSearchTerm] = React.useState('');
-            const [statusFilter, setStatusFilter] = React.useState('open'); // Changed default from 'all' to 'open'
+            const [statusFilter, setStatusFilter] = React.useState('open'); 
             const [emergencyFilter, setEmergencyFilter] = React.useState(false); 
             const [awaitingCustomerFilter, setAwaitingCustomerFilter] = React.useState(false);
             
             const { addToast } = useToasts();
+            const statusFilterRef = React.useRef(statusFilter);
+
+            React.useEffect(() => {
+                statusFilterRef.current = statusFilter;
+            }, [statusFilter]);
 
             const fetchAllProducts = async () => {
                 let allProducts = [];
@@ -1878,7 +1951,7 @@
                 do {
                     const { data, error } = await supabaseClient
                         .from('product')
-                        .select('*, brand(*), productproperty(*, propertykey(*))')
+                        .select('id, title, image_url, brand(id, title), productproperty(value, propertykey(id, title))')
                         .eq('isdeleted', false)
                         .range(page * pageSize, (page + 1) * pageSize - 1);
 
@@ -1915,19 +1988,47 @@
                 }
             };
 
-            const fetchData = async (isAutoRefresh = false) => {
+            const fetchDemands = async (currentFilter = 'open', isAutoRefresh = false) => {
                 if (!isAutoRefresh) setIsLoading(true);
                 setError('');
                 try {
-                    const { data: demandData, error: demandError } = await supabaseClient
+                    // ساخت کوئری داینامیک: اگر فیلتر 'all' نباشد از inner join استفاده می‌کنیم تا فقط رکوردهای مرتبط از دیتابیس دریافت شوند
+                    const itemJoin = currentFilter !== 'all' ? 'demand_item!inner' : 'demand_item';
+                    const statusJoin = currentFilter !== 'all' ? 'demandstatustype!inner' : 'demandstatustype';
+                    
+                    const selectStr = `
+                        id, createdat, deadlinedate, is_emergency, 
+                        profiles(id, fullname, firstname, mobile), 
+                        location(id, address, city(title, province(title))), 
+                        ${itemJoin}(
+                            id, quantity, approved_supply_price, approved_supply_quantity, demand_admin_note, supply_admin_note, demandstatusid, productid, 
+                            product(id, title, image_url, brand(title), productproperty(value, propertykey(title))), 
+                            ${statusJoin}(id, main_status, title_farsi)
+                        )
+                    `;
+
+                    let query = supabaseClient
                         .from('demand')
-                        .select('id, createdat, deadlinedate, is_emergency, profiles(id, fullname, firstname, mobile), location(*, city(*, province(*))), demand_item(id, quantity, approved_supply_price, approved_supply_quantity, demand_admin_note, supply_admin_note, demandstatusid, productid, product(id, title, brand(*), productproperty(*, propertykey(*))), demandstatustype(*))')
-                        .order('createdat', { ascending: false });
+                        .select(selectStr)
+                        .order('createdat', { ascending: false }); 
+                        
+                    // اعمال فیلتر مستقیم روی دیتابیس برای جلوگیری از دریافت داده‌های اضافی (کاهش شدید مصرف اینترنت و رم)
+                    if (currentFilter !== 'all') {
+                        let statusValue = 'Open';
+                        if (currentFilter === 'fulfilled') statusValue = 'Fulfilled';
+                        if (currentFilter === 'cancelled') statusValue = 'Cancelled';
+                        
+                        query = query.eq('demand_item.demandstatustype.main_status', statusValue);
+                    }
+                    
+                    const { data: demandData, error: demandError } = await query;
+                        
                     if (demandError) throw demandError;
                     
                     const demandsWithCalculatedStatus = demandData.map(d => {
-                        let status = 'open';
-                        if (d.demand_item.length > 0) {
+                        let status = currentFilter !== 'all' ? currentFilter : 'open';
+                        
+                        if (d.demand_item && d.demand_item.length > 0) {
                             const allItemsAreClosed = d.demand_item.every(
                                 item => item.demandstatustype?.main_status === 'Fulfilled' || item.demandstatustype?.main_status === 'Cancelled'
                             );
@@ -1936,16 +2037,13 @@
                                 const hasAtLeastOneFulfilled = d.demand_item.some(
                                     item => item.demandstatustype?.main_status === 'Fulfilled'
                                 );
-
-                                if (hasAtLeastOneFulfilled) {
-                                    status = 'fulfilled';
-                                } else {
-                                    status = 'cancelled';
-                                }
+                                status = hasAtLeastOneFulfilled ? 'fulfilled' : 'cancelled';
+                            } else {
+                                status = 'open';
                             }
                         }
 
-                        const totalValue = d.demand_item.reduce((sum, item) => {
+                        const totalValue = (d.demand_item || []).reduce((sum, item) => {
                             const price = item.approved_supply_price || 0;
                             const quantity = item.approved_supply_quantity || 0;
                             return sum + (price * quantity);
@@ -1953,80 +2051,118 @@
 
                         return { ...d, status, totalValue };
                     });
+                    
+                    // چون فیلتر سمت سرور انجام شده، دیگر نیازی به فیلتر مجدد آرایه سمت کلاینت نیست
                     setDemands(demandsWithCalculatedStatus || []);
 
-                    const customerRoleRes = await supabaseClient.from('role').select('id').eq('title', 'Customer').single();
-                    const customerRoleIdFetched = customerRoleRes.data?.id;
-                    setCustomerRoleId(customerRoleIdFetched);
-
-                    const [customerRes, productsRes, statusesRes, channelsRes, provincesRes] = await Promise.all([
-                        // اصلاح: حذف فیلتر .eq('roleid', customerRoleIdFetched) تا همه کاربران لود شوند
-                        // همچنین نقش کاربر (role) هم دریافت می‌شود تا در لیست نمایش داده شود
-                        supabaseClient.from('profiles').select('id, fullname, firstname, mobile, role:roleid(title)').eq('isdeleted', false).order('fullname'),
-                        fetchAllProducts(),
-                        supabaseClient.from('demandstatustype').select('*').order('main_status').order('id'),
-                        supabaseClient.from('marketingchannel').select('*').order('title'),
-                        supabaseClient.from('province').select('*').order('title')
-                    ]);
-                    
-                    setCustomers(customerRes.data || []);
-                    setProducts(productsRes || []);
-                    setDemandStatuses(statusesRes.data || []);
-                    setMarketingChannels(channelsRes.data || []);
-                    setProvinces(provincesRes.data || []);
-                    
-                    // Set default status ID for new items
-                    const defaultStatus = statusesRes.data?.find(s => s.title_farsi === 'در انتظار تامین');
-                    if (defaultStatus) {
-                        setDefaultStatusId(defaultStatus.id);
-                    } else {
-                        console.warn("Default status 'در انتظار تامین' not found. Falling back to first available status.");
-                        setDefaultStatusId(statusesRes.data?.[0]?.id || null);
-                    }
-
-                    // Fetch currencies
-                    fetchCurrencies();
-
-                } catch (err)
-                {
+                } catch (err) {
                     console.error("Error fetching demand data:", err);
-                    setError(`خطا در بارگذاری اطلاعات: ${err.message}`);
+                    setError(`خطا در بارگذاری تقاضاها: ${err.message}`);
                     if (!isAutoRefresh) addToast('خطا در بارگذاری اطلاعات', 'error');
                 } finally {
                     if (!isAutoRefresh) setIsLoading(false);
                 }
             };
 
-            React.useEffect(() => { fetchData(); }, []);
+            // تابع سریع: فقط اطلاعات پایه ضروری (مشتری، استان، کانال، نقش) را می‌گیرد
+            const fetchBasicRefData = async () => {
+                setIsBasicRefLoading(true);
+                try {
+                    const customerRoleRes = await supabaseClient.from('role').select('id').eq('title', 'Customer').single();
+                    setCustomerRoleId(customerRoleRes.data?.id);
+
+                    const [customerRes, statusesRes, channelsRes, provincesRes] = await Promise.all([
+                        supabaseClient.from('profiles').select('id, fullname, firstname, mobile, role:roleid(title)').eq('isdeleted', false).order('fullname'),
+                        supabaseClient.from('demandstatustype').select('id, main_status, title_farsi').order('main_status').order('id'),
+                        supabaseClient.from('marketingchannel').select('id, title').order('title'),
+                        supabaseClient.from('province').select('id, title').order('title')
+                    ]);
+                    
+                    setCustomers(customerRes.data || []);
+                    setDemandStatuses(statusesRes.data || []);
+                    setMarketingChannels(channelsRes.data || []);
+                    setProvinces(provincesRes.data || []);
+                    
+                    const defaultStatus = statusesRes.data?.find(s => s.title_farsi === 'در انتظار تامین');
+                    if (defaultStatus) {
+                        setDefaultStatusId(defaultStatus.id);
+                    } else {
+                        setDefaultStatusId(statusesRes.data?.[0]?.id || null);
+                    }
+                } catch (err) {
+                    console.error("Error fetching basic reference data:", err);
+                } finally {
+                    setIsBasicRefLoading(false); // فعال شدن دکمه ثبت تقاضا
+                }
+            };
+
+            // تابع سنگین: فقط محصولات را می‌گیرد
+            const fetchProductsInBackground = async () => {
+                setIsProductsLoading(true);
+                try {
+                    const productsRes = await fetchAllProducts();
+                    setProducts(productsRes || []);
+                } catch (err) {
+                    console.error("Error fetching products data:", err);
+                } finally {
+                    setIsProductsLoading(false);
+                }
+            };
+
+            React.useEffect(() => { 
+                fetchDemands(statusFilter); 
+            }, [statusFilter]); // با تغییر تب فیلتر، دیتای جدید واکشی می‌شود
+
+            React.useEffect(() => { 
+                fetchBasicRefData().then(() => {
+                    fetchProductsInBackground(); 
+                });
+                
+                // تاخیر ۵ ثانیه‌ای برای لود کردن ارزها
+                setTimeout(() => {
+                    fetchCurrencies();
+                }, 5000);
+            }, []);
 
             // Fetch Retargeting Data when tab changes
             React.useEffect(() => {
-                if (activeTab === 'retargeting' && demands.length > 0) {
+                if (activeTab === 'retargeting') {
                     fetchRetargetingData();
                 }
-            }, [activeTab, demands]);
+            }, [activeTab]);
 
             const fetchRetargetingData = async () => {
                 setIsRetargetingLoading(true);
                 try {
-                    // 1. Identify cancelled items
-                    const cancelled = [];
-                    demands.forEach(d => {
-                        d.demand_item.forEach(item => {
-                            // Focus on Cancelled items
-                            if (item.demandstatustype?.main_status === 'Cancelled' && (item.product || item.productid)) {
-                                 // Check if already retargeted
-                                 if (item.demand_admin_note && item.demand_admin_note.includes('[Retargeted]')) return;
+                    // 1. واکشی مستقیم آیتم‌های لغو شده از دیتابیس فارغ از وضعیت تقاضاها در تب قبلی
+                    const { data: cancelledItemsData, error: cancelledError } = await supabaseClient
+                        .from('demand_item')
+                        .select(`
+                            id, quantity, productid, demand_admin_note, createdat,
+                            demandstatustype!inner(main_status),
+                            product(id, title, image_url, brand(title)),
+                            demand!inner(id, createdat, profiles(id, fullname, firstname, mobile), location(id, address, city(title, province(title))))
+                        `)
+                        .eq('demandstatustype.main_status', 'Cancelled')
+                        .order('createdat', { ascending: false })
+                        .limit(300);
 
-                                cancelled.push({
-                                    ...item,
-                                    productid: item.productid || item.product?.id,
-                                    customer: d.profiles,
-                                    location: d.location,
-                                    demandDate: d.createdat
-                                });
-                            }
-                        });
+                    if (cancelledError) throw cancelledError;
+
+                    const cancelled = [];
+                    (cancelledItemsData || []).forEach(item => {
+                        if (item.product || item.productid) {
+                            // عدم نمایش مواردی که قبلا بازاریابی مجدد شده‌اند
+                            if (item.demand_admin_note && item.demand_admin_note.includes('[Retargeted]')) return;
+
+                            cancelled.push({
+                                ...item,
+                                productid: item.productid || item.product?.id,
+                                customer: item.demand?.profiles,
+                                location: item.demand?.location,
+                                demandDate: item.demand?.createdat || item.createdat
+                            });
+                        }
                     });
 
                     if (cancelled.length === 0) {
@@ -2045,7 +2181,6 @@
                     }
 
                     // Note: Supabase limits 'in' filter to a certain number of items, usually enough for this scale.
-                    // If productIds is huge, active chunking might be needed, but OK for now.
                     const { data: stock, error } = await supabaseClient
                         .from('supplierstock')
                         .select('productid, unitprice, lastupdatedat, supplieruserid, profiles:supplieruserid(fullname, firstname, mobile, emergencyphonenumber)')
@@ -2234,15 +2369,15 @@
                     setCountdown(prevCountdown => {
                         if (prevCountdown <= 1) {
                             console.log("Auto-refreshing data...");
-                            fetchData(true); // Fetch data
-                            return 300; // Reset countdown to 5 minutes
+                            fetchDemands(statusFilterRef.current, true); // فقط تقاضاهای مربوط به فیلتر فعلی رفرش شود
+                            return 300; 
                         }
-                        return prevCountdown - 1; // Decrement
+                        return prevCountdown - 1; 
                     });
-                }, 1000); // Every second
+                }, 1000); 
 
                 return () => clearInterval(timer);
-            }, []); // Empty dependency array ensures this effect runs only once
+            }, []); 
             
             const filteredDemands = React.useMemo(() => {
                 return demands
@@ -2266,13 +2401,12 @@
                         const idMatch = String(demand.id).includes(searchTermLower);
                         return customerMatch || productMatch || idMatch;
                     })
-                    .filter(demand => statusFilter === 'all' || demand.status === statusFilter)
                     .filter(demand => !emergencyFilter || demand.is_emergency === true)
                     .filter(demand => 
                         !awaitingCustomerFilter || 
                         demand.demand_item.some(item => item.demandstatustype?.title_farsi === "کالا تامین شد و منتظر تصمیم مشتری هست")
                     );
-            }, [demands, searchTerm, statusFilter, emergencyFilter, awaitingCustomerFilter]);
+            }, [demands, searchTerm, emergencyFilter, awaitingCustomerFilter]);
 
             // Filter logic for Retargeting
             const filteredRetargetingItems = React.useMemo(() => {
@@ -2328,7 +2462,7 @@
                             }
                             await supabaseClient.from('demand_item').delete().eq('demandid', demandId);
                             await supabaseClient.from('demand').delete().eq('id', demandId);
-                            fetchData(true); 
+                            fetchDemands(statusFilter, true); 
                             addToast('تقاضا با موفقیت حذف شد.');
                         } catch (err) {
                             console.error("Error deleting demand:", err);
@@ -2394,13 +2528,11 @@
 
                             if (updateOldError) {
                                 console.error("Error updating old item:", updateOldError);
-                                // We continue even if this fails, or maybe show a warning? 
-                                // Best to just log it. The primary action (reissue) succeeded.
                             }
 
                             addToast('تقاضای جدید با موفقیت صادر شد', 'success');
-                            fetchData(true); // Refresh demands list
-                            // Optionally refresh retargeting list if needed, but not strictly required as the old one stays "cancelled" until acted upon or logic changes
+                            fetchDemands(statusFilter, true); // Refresh demands list in background
+                            fetchRetargetingData(); // Refresh retargeting list immediately
                             
                         } catch (err) {
                             console.error("Error reissuing demand:", err);
@@ -2414,15 +2546,15 @@
 
             const handleOpenModal = () => setIsModalOpen(true);
             const handleCloseModal = () => setIsModalOpen(false);
-            const handleSaveDemand = () => { fetchData(true); handleCloseModal(); addToast('تقاضای جدید با موفقیت ثبت شد.') };
+            const handleSaveDemand = () => { fetchDemands(statusFilter, true); handleCloseModal(); addToast('تقاضای جدید با موفقیت ثبت شد.') };
             
             const handleOpenEditItemModal = (item, demand) => { setEditingItem(item); setEditingDemand(demand); setIsEditItemModalOpen(true); };
             const handleCloseEditItemModal = () => { setEditingItem(null); setEditingDemand(null); setIsEditItemModalOpen(false); };
-            const handleSaveItem = () => { fetchData(true); handleCloseEditItemModal(); addToast('آیتم با موفقیت به‌روزرسانی شد.'); };
+            const handleSaveItem = () => { fetchDemands(statusFilter, true); handleCloseEditItemModal(); addToast('آیتم با موفقیت به‌روزرسانی شد.'); };
 
             const handleOpenManageItemsModal = (demand) => { setDemandToManage(demand); setIsManageItemsModalOpen(true); };
             const handleCloseManageItemsModal = () => { setDemandToManage(null); setIsManageItemsModalOpen(false); };
-            const handleSaveManagedItems = () => { fetchData(true); handleCloseManageItemsModal(); addToast('اقلام تقاضا با موفقیت مدیریت شد.'); };
+            const handleSaveManagedItems = () => { fetchDemands(statusFilter, true); handleCloseManageItemsModal(); addToast('اقلام تقاضا با موفقیت مدیریت شد.'); };
             
             const scrollToTop = () => {
                 window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -2486,8 +2618,17 @@
                                 )}
                             </button>
                             {/* New Demand Button */}
-                            <button onClick={handleOpenModal} className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-lg flex items-center gap-2 transition shadow-md hover:shadow-lg">
-                                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clipRule="evenodd" /></svg>
+                            <button 
+                                onClick={handleOpenModal} 
+                                disabled={isBasicRefLoading}
+                                className={`bg-indigo-600 text-white font-bold py-2 px-4 rounded-lg flex items-center gap-2 transition shadow-md ${isBasicRefLoading ? 'opacity-70 cursor-not-allowed' : 'hover:bg-indigo-700 hover:shadow-lg'}`}
+                                title={isBasicRefLoading ? 'در حال بارگذاری اطلاعات پایه...' : ''}
+                            >
+                                {isBasicRefLoading ? (
+                                    <span className="spinner w-4 h-4 border-white m-0 border-2"></span>
+                                ) : (
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clipRule="evenodd" /></svg>
+                                )}
                                 <span>ثبت تقاضای جدید</span>
                             </button>
                         </div>
@@ -2512,7 +2653,7 @@
                             className={`py-3 px-6 font-medium text-sm border-b-2 transition-colors whitespace-nowrap flex items-center gap-2 ${activeTab === 'predemand' ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400' : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'}`}
                             onClick={() => setActiveTab('predemand')}
                         >
-                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" /></svg>
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" /></svg>
                             آفر و پیش‌تقاضا
                         </button>
                     </div>
@@ -2585,7 +2726,11 @@
                                                 <span className={`px-2 py-1 text-xs rounded-full font-semibold ${demand.status === 'fulfilled' ? 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200' : demand.status === 'cancelled' ? 'bg-gray-200 text-gray-800 dark:bg-gray-600 dark:text-gray-200' : 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'}`}>
                                                     {demand.status === 'fulfilled' ? 'تکمیل شده' : demand.status === 'cancelled' ? 'لغو شده' : 'باز'}
                                                 </span>
-                                                <button onClick={() => handleOpenManageItemsModal(demand)} className="text-gray-400 hover:text-indigo-500 dark:hover:text-indigo-400 p-1 rounded-full transition-colors" title="مدیریت اقلام">
+                                                <button 
+                                                    onClick={() => handleOpenManageItemsModal(demand)} 
+                                                    className="p-1 rounded-full transition-colors text-gray-400 hover:text-indigo-500 dark:hover:text-indigo-400" 
+                                                    title="مدیریت اقلام"
+                                                >
                                                     <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
                                                         <path d="M17.414 2.586a2 2 0 00-2.828 0L7 10.172V13h2.828l7.586-7.586a2 2 0 000-2.828z" />
                                                         <path fillRule="evenodd" d="M2 6a2 2 0 012-2h4a1 1 0 010 2H4v10h10v-4a1 1 0 112 0v4a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" clipRule="evenodd" />
@@ -2614,12 +2759,33 @@
                                                 {demand.demand_item.map((item, itemIndex) => (
                                                     <React.Fragment key={item.id}>
                                                         <tr className="hover:bg-gray-50 dark:hover:bg-gray-700/20">
-                                                            <td className="p-3 font-semibold text-gray-800 dark:text-gray-100">{item.product ? `${item.product.brand ? item.product.brand.title + ' ' : ''}${item.product.title}`: 'محصول حذف شده'}</td>
+                                                            <td className="p-3 font-semibold text-gray-800 dark:text-gray-100">
+                                                                <div className="flex items-center gap-3">
+                                                                    {/* نمایش عکس کالا با لود تنبل و افکت بزرگنمایی */}
+                                                                    {item.product?.image_url ? (
+                                                                        <img src={item.product.image_url} loading="lazy" className="w-16 h-16 md:w-20 md:h-20 rounded-md object-cover border border-gray-200 dark:border-gray-600 shadow-sm hover:scale-[1.5] transition-transform duration-300 relative z-10 hover:z-50" />
+                                                                    ) : (
+                                                                        <div className="w-16 h-16 md:w-20 md:h-20 rounded-md bg-gray-100 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 flex items-center justify-center text-xs text-gray-400">بدون عکس</div>
+                                                                    )}
+                                                                    <span>{item.product ? `${item.product.brand ? item.product.brand.title + ' ' : ''}${item.product.title}`: 'محصول حذف شده'}</span>
+                                                                </div>
+                                                            </td>
                                                             <td className="p-3">{item.quantity}</td>
                                                             <td className="p-3 font-mono">{formatCurrency(item.approved_supply_price)}</td>
                                                             <td className="p-3">{item.approved_supply_quantity || '-'}</td>
-                                                            <td className="p-3"><span className="px-2 py-1 text-xs rounded-full whitespace-nowrap" style={{ backgroundColor: item.demandstatustype?.color_bg || '#E5E7EB', color: item.demandstatustype?.color_text || '#1F2937' }}>{item.demandstatustype?.title_farsi || 'ثبت شده'}</span></td>
-                                                            <td className="p-3"><button onClick={() => handleOpenEditItemModal(item, demand)} className="text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 hover:underline text-xs font-semibold">ویرایش</button></td>
+                                                            <td className="p-3">
+                                                                <span className="px-2 py-1 text-xs rounded-full whitespace-nowrap" style={{ backgroundColor: item.demandstatustype?.color_bg || '#E5E7EB', color: item.demandstatustype?.color_text || '#1F2937' }}>
+                                                                    {item.demandstatustype?.title_farsi || 'ثبت شده'}
+                                                                </span>
+                                                            </td>
+                                                            <td className="p-3">
+                                                                <button 
+                                                                    onClick={() => handleOpenEditItemModal(item, demand)} 
+                                                                    className="text-xs font-semibold transition-colors text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 hover:underline"
+                                                                >
+                                                                    ویرایش
+                                                                </button>
+                                                            </td>
                                                         </tr>
                                                         {(item.demand_admin_note || item.supply_admin_note) && (
                                                             <tr className="bg-gray-50 dark:bg-gray-900/20">
@@ -2640,10 +2806,15 @@
                                             {demand.demand_item.map((item, itemIndex) => (
                                                 <div key={item.id} className="p-3 border border-gray-200 dark:border-gray-700 rounded-lg bg-gray-50 dark:bg-gray-700/50 space-y-2">
                                                     <div className="flex justify-between items-start border-b pb-2 mb-2 border-gray-200 dark:border-gray-600">
-                                                        <div className="font-bold text-sm text-indigo-700 dark:text-indigo-400">
-                                                            {item.product ? `${item.product.brand ? item.product.brand.title + ' ' : ''}${item.product.title}`: 'محصول حذف شده'}
+                                                        <div className="font-bold text-sm text-indigo-700 dark:text-indigo-400 flex items-center gap-3">
+                                                            {/* نمایش عکس کالا در حالت موبایل */}
+                                                            {item.product?.image_url && <img src={item.product.image_url} loading="lazy" className="w-14 h-14 rounded-md object-cover border border-gray-200 dark:border-gray-600 shadow-sm" />}
+                                                            <span>{item.product ? `${item.product.brand ? item.product.brand.title + ' ' : ''}${item.product.title}`: 'محصول حذف شده'}</span>
                                                         </div>
-                                                        <button onClick={() => handleOpenEditItemModal(item, demand)} className="text-indigo-600 dark:text-indigo-400 hover:underline text-xs font-semibold px-2 py-1 rounded-md bg-indigo-100 dark:bg-indigo-900/50">
+                                                        <button 
+                                                            onClick={() => handleOpenEditItemModal(item, demand)} 
+                                                            className="text-xs font-semibold px-2 py-1 rounded-md transition-colors text-indigo-600 dark:text-indigo-400 hover:underline bg-indigo-100 dark:bg-indigo-900/50"
+                                                        >
                                                             ویرایش
                                                         </button>
                                                     </div>
@@ -2744,8 +2915,9 @@
                                         <div key={item.id} className="bg-white dark:bg-gray-800 rounded-lg shadow border border-gray-200 dark:border-gray-700 overflow-hidden">
                                             <div className="p-4 border-b border-gray-200 dark:border-gray-700 flex flex-col md:flex-row justify-between gap-4 bg-gray-50 dark:bg-gray-900/50">
                                                 <div>
-                                                    <h3 className="text-lg font-bold text-indigo-700 dark:text-indigo-400 mb-1">
-                                                        {item.product?.brand?.title} {item.product?.title}
+                                                    <h3 className="text-lg font-bold text-indigo-700 dark:text-indigo-400 mb-1 flex items-center gap-3">
+                                                        {item.product?.image_url && <img src={item.product.image_url} loading="lazy" className="w-16 h-16 rounded-md object-cover border border-gray-200 dark:border-gray-600 shadow-sm" />}
+                                                        <span>{item.product?.brand?.title} {item.product?.title}</span>
                                                     </h3>
                                                     <div className="text-sm text-gray-500 dark:text-gray-400 flex flex-wrap gap-x-4 gap-y-1">
                                                         <span>مشتری: <span className="font-semibold text-gray-800 dark:text-gray-200">{formatProfileName(item.customer)}</span> ({item.customer?.mobile})</span>
@@ -2897,7 +3069,14 @@
                                                 {preDemandItems.map((item) => (
                                                     <tr key={item.id} className="hover:bg-gray-50/50 dark:hover:bg-gray-700/20 transition-colors">
                                                         <td className="p-4 font-medium text-gray-800 dark:text-gray-200">
-                                                            {item.product?.brand?.title} {item.product?.title}
+                                                            <div className="flex items-center gap-3">
+                                                                {item.product?.image_url ? (
+                                                                    <img src={item.product.image_url} loading="lazy" className="w-16 h-16 rounded-md object-cover border border-gray-200 dark:border-gray-600 shadow-sm hover:scale-150 transition-transform duration-300 relative z-10 hover:z-50" />
+                                                                ) : (
+                                                                     <div className="w-16 h-16 rounded-md bg-gray-100 dark:bg-gray-700 flex items-center justify-center text-xs text-gray-400">بدون عکس</div>
+                                                                )}
+                                                                <span>{item.product?.brand?.title} {item.product?.title}</span>
+                                                            </div>
                                                         </td>
                                                         <td className="p-4 text-center font-mono text-gray-500 dark:text-gray-400">
                                                             {item.totalHistoryQty}
@@ -2964,9 +3143,9 @@
                         </div>
                     )}
 
-                    {isModalOpen && <DemandFormModal isOpen={isModalOpen} onClose={handleCloseModal} onSave={handleSaveDemand} customers={customers} products={products} defaultStatusId={defaultStatusId} onCustomerCreated={(newCustomer) => { setCustomers(prev => [...prev, newCustomer].sort((a,b) => a.fullname.localeCompare(b.fullname))); }} customerRoleId={customerRoleId} marketingChannels={marketingChannels} provinces={provinces} initialData={demandModalInitialData} />}
-                    {isEditItemModalOpen && <EditDemandItemModal isOpen={isEditItemModalOpen} onClose={handleCloseEditItemModal} onSave={handleSaveItem} onRefresh={fetchData} itemToEdit={editingItem} demand={editingDemand} demandStatuses={demandStatuses} groupedStatuses={groupedStatuses} allProfiles={customers} />}
-                    {isManageItemsModalOpen && <ManageDemandItemsModal isOpen={isManageItemsModalOpen} onClose={handleCloseManageItemsModal} onSave={handleSaveManagedItems} demandToEdit={demandToManage} products={products} defaultStatusId={defaultStatusId} />}
+                    {isModalOpen && <DemandFormModal isOpen={isModalOpen} onClose={handleCloseModal} onSave={handleSaveDemand} customers={customers} products={products} defaultStatusId={defaultStatusId} onCustomerCreated={(newCustomer) => { setCustomers(prev => [...prev, newCustomer].sort((a,b) => a.fullname.localeCompare(b.fullname))); }} customerRoleId={customerRoleId} marketingChannels={marketingChannels} provinces={provinces} initialData={demandModalInitialData} isProductsLoading={isProductsLoading} />}
+                    {isEditItemModalOpen && <EditDemandItemModal isOpen={isEditItemModalOpen} onClose={handleCloseEditItemModal} onSave={handleSaveItem} onRefresh={fetchDemands} itemToEdit={editingItem} demand={editingDemand} demandStatuses={demandStatuses} groupedStatuses={groupedStatuses} allProfiles={customers} />}
+                    {isManageItemsModalOpen && <ManageDemandItemsModal isOpen={isManageItemsModalOpen} onClose={handleCloseManageItemsModal} onSave={handleSaveManagedItems} demandToEdit={demandToManage} products={products} defaultStatusId={defaultStatusId} isProductsLoading={isProductsLoading} />}
                     <ConfirmModal isOpen={confirmState.isOpen} onClose={() => setConfirmState({ isOpen: false, onConfirm: null, message: '', title: '' })} onConfirm={confirmState.onConfirm} title={confirmState.title} message={confirmState.message} />
                     
                     {/* Floating Scroll Buttons */}
