@@ -85,10 +85,8 @@
         // ==================================================
         // Supabase Client Setup
         // ==================================================
-        // Access supabase from window object to avoid ReferenceError
         const { createClient } = window.supabase;
 
-        // Note: The Supabase variables __supabase_url and __supabase_anon_key are expected to be available globally in the execution environment.
         const supabaseUrl = typeof __supabase_url !== 'undefined' ? __supabase_url : 'https://wehyjatotbzxargnxasg.supabase.co';
         const supabaseKey = typeof __supabase_anon_key !== 'undefined' ? __supabase_anon_key : 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndlaHlqYXRvdGJ6eGFyZ254YXNnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTE5MTIwMjEsImV4cCI6MjA2NzQ4ODAyMX0.2R448DuEBlTrNvaYXiYZ8D5M7MJNv7n1qmIDHQBNFiY';
 
@@ -105,7 +103,6 @@
 
         const formatSafeNumber = (val) => {
             if (!val) return '۰';
-            // Remove commas or other non-numeric chars if stored as text
             const cleanVal = String(val).replace(/,/g, '');
             const num = Number(cleanVal);
             return isNaN(num) ? 'خطا' : num.toLocaleString('fa-IR');
@@ -117,7 +114,6 @@
                 const date = new Date(dateString);
                 if (isNaN(date)) return '-';
                 if (!window.jalaali || !window.jalaali.toJalaali) { 
-                    // Fallback to standard date if jalaali-js is unavailable
                     return date.toLocaleString('en-CA');
                 }
                 const jDate = window.jalaali.toJalaali(date);
@@ -129,7 +125,6 @@
                 const minutes = String(date.getMinutes()).padStart(2, '0');
                 return `${year}/${month}/${day} ${hours}:${minutes}`;
             } catch (e) {
-                console.error("Error formatting datetime:", e);
                 return dateString;
             }
         };
@@ -198,7 +193,6 @@
                 );
             }, [options, searchTerm]);
 
-            // بهینه‌سازی: محدود کردن تعداد آیتم‌های نمایشی به 30 مورد برای جلوگیری از فریز شدن صفحه در رندر 10,000 گره DOM
             const displayOptions = filteredOptions.slice(0, 30);
 
             React.useEffect(() => {
@@ -239,7 +233,6 @@
                                             onClick={() => handleSelect(option)}
                                             className="p-2 hover:bg-indigo-50 dark:hover:bg-indigo-900/40 cursor-pointer flex items-center gap-3 border-b border-gray-50 dark:border-gray-700/50 last:border-0"
                                         >
-                                            {/* نمایش و لود تنبل تصویر در جستجو */}
                                             {option.image !== undefined && (
                                                 option.image ? (
                                                     <img src={option.image} alt={option.title} loading="lazy" className="w-12 h-12 rounded object-cover border border-gray-200 dark:border-gray-600 bg-white" />
@@ -299,7 +292,6 @@
                     const password = formData.mobile.slice(-6);
                     if (password.length < 6) throw new Error('شماره موبایل باید معتبر باشد (حداقل ۶ رقم).');
                     
-                    // بررسی اینکه آیا شماره موبایل از قبل در سیستم وجود دارد یا خیر (جلوگیری از ایجاد کاربر تکراری)
                     const { data: existingProfiles, error: searchError } = await supabaseClient
                         .from('profiles')
                         .select('fullname, role:roleid(title)')
@@ -421,11 +413,11 @@
             );
         };
 
-        const DemandFormModal = ({ isOpen, onClose, onSave, customers, products, defaultStatusId, onCustomerCreated, customerRoleId, marketingChannels, provinces, initialData, isProductsLoading }) => {
+        const DemandFormModal = ({ isOpen, onClose, onSave, customers, products, defaultStatusId, pendingRegStatusId, onCustomerCreated, customerRoleId, marketingChannels, provinces, initialData, isProductsLoading }) => {
             const [customerId, setCustomerId] = React.useState('');
             const [deadline, setDeadline] = React.useState('');
             const [isEmergency, setIsEmergency] = React.useState(false);
-            const [items, setItems] = React.useState([{ productid: '', quantity: '', demand_admin_note: '', supply_admin_note: '', key: crypto.randomUUID() }]);
+            const [items, setItems] = React.useState([{ productid: '', quantity: '', demand_admin_note: '', supply_admin_note: '', is_unregistered: false, unregistered_product_title: '', unregistered_product_image_url: '', imageFile: null, imagePreview: '', key: crypto.randomUUID() }]);
             const [error, setError] = React.useState('');
             const [isLoading, setIsLoading] = React.useState(false);
             const [supplierPrices, setSupplierPrices] = React.useState({});
@@ -435,7 +427,6 @@
             const [locationId, setLocationId] = React.useState('');
             const [isFetchingLocations, setIsFetchingLocations] = React.useState(false);
 
-            // --- NEW: Load initial data if provided (from Pre-Demand) ---
             React.useEffect(() => {
                 if (initialData && isOpen) {
                     setCustomerId(initialData.customerId || '');
@@ -445,13 +436,18 @@
                             quantity: item.suggestedQty || '',
                             demand_admin_note: '',
                             supply_admin_note: '',
+                            is_unregistered: false,
+                            unregistered_product_title: '',
+                            unregistered_product_image_url: '',
+                            imageFile: null,
+                            imagePreview: '',
                             key: crypto.randomUUID()
                         })));
                     }
                 } else if (isOpen) {
                     // Reset if opened normally
                     setCustomerId('');
-                    setItems([{ productid: '', quantity: '', demand_admin_note: '', supply_admin_note: '', key: crypto.randomUUID() }]);
+                    setItems([{ productid: '', quantity: '', demand_admin_note: '', supply_admin_note: '', is_unregistered: false, unregistered_product_title: '', unregistered_product_image_url: '', imageFile: null, imagePreview: '', key: crypto.randomUUID() }]);
                     setDeadline('');
                     setIsEmergency(false);
                 }
@@ -487,8 +483,8 @@
                 fetchLocations();
             }, [customerId]);
 
-            const handleAddItem = () => {
-                setItems([...items, { productid: '', quantity: '', demand_admin_note: '', supply_admin_note: '', key: crypto.randomUUID() }]);
+            const handleAddItem = (isUnregistered = false) => {
+                setItems([...items, { productid: '', quantity: '', demand_admin_note: '', supply_admin_note: '', is_unregistered: isUnregistered, unregistered_product_title: '', unregistered_product_image_url: '', imageFile: null, imagePreview: '', key: crypto.randomUUID() }]);
             };
 
             const handleItemChange = async (index, field, value) => {
@@ -497,7 +493,6 @@
                 setItems(newItems);
 
                 if (field === 'productid' && value) {
-                    // Fetch supplier prices for the selected product
                     const { data, error } = await supabaseClient
                         .from('supplierstock')
                         .select('unitprice, profiles:supplieruserid (fullname)')
@@ -510,6 +505,17 @@
                     }
                 }
             };
+            
+            const handleFileChange = (index, e) => {
+                const file = e.target.files[0];
+                if (file) {
+                    const newItems = [...items];
+                    newItems[index].imageFile = file;
+                    // Create a local preview
+                    newItems[index].imagePreview = URL.createObjectURL(file);
+                    setItems(newItems);
+                }
+            };
 
             const handleRemoveItem = (index) => {
                 setItems(items.filter((_, i) => i !== index));
@@ -517,8 +523,12 @@
 
             const handleSubmit = async (e) => {
                 e.preventDefault();
-                if (!customerId || items.length === 0 || items.some(i => !i.productid || !i.quantity)) {
-                    setError('لطفا مشتری را انتخاب کرده و حداقل یک کالا با تعداد مشخص اضافه کنید.');
+                if (!customerId || items.length === 0) {
+                    setError('لطفا مشتری را انتخاب کرده و حداقل یک کالا اضافه کنید.');
+                    return;
+                }
+                if (items.some(i => (i.is_unregistered && (!i.unregistered_product_title || !i.unregistered_product_title.trim())) || (!i.is_unregistered && !i.productid) || !i.quantity)) {
+                    setError('لطفا اطلاعات تمام کالاها (نام/انتخاب محصول و تعداد) را کامل کنید.');
                     return;
                 }
                 if (customerLocations.length > 0 && !locationId) {
@@ -530,6 +540,33 @@
                 setError('');
 
                 try {
+                    // Upload Images for Unregistered Items First
+                    const processedItems = await Promise.all(items.map(async (item) => {
+                        let imageUrl = item.unregistered_product_image_url || null;
+                        
+                        if (item.is_unregistered && item.imageFile) {
+                            const fileExt = item.imageFile.name.split('.').pop();
+                            const fileName = `${crypto.randomUUID()}.${fileExt}`;
+                            
+                            const { data: uploadData, error: uploadError } = await supabaseClient.storage
+                                .from('unregistered_products')
+                                .upload(fileName, item.imageFile);
+                                
+                            if (uploadError) {
+                                console.error("Error uploading image:", uploadError);
+                                // Continue without image if upload fails, or we could throw an error here.
+                            } else {
+                                const { data } = supabaseClient.storage.from('unregistered_products').getPublicUrl(fileName);
+                                imageUrl = data.publicUrl;
+                            }
+                        }
+                        
+                        return {
+                            ...item,
+                            unregistered_product_image_url: imageUrl
+                        };
+                    }));
+
                     // Step 1: Create the demand header
                     const { data: demandData, error: demandError } = await supabaseClient
                         .from('demand')
@@ -544,36 +581,40 @@
 
                     if (demandError) throw demandError;
 
-                    // Step 2: Prepare and insert the demand items with default status
-                    const demandItems = items.map(item => ({
-                        demandid: demandData.id,
-                        productid: item.productid,
-                        quantity: Number(item.quantity),
-                        demand_admin_note: item.demand_admin_note,
-                        supply_admin_note: item.supply_admin_note,
-                        demandstatusid: defaultStatusId 
-                    }));
+                    // Step 2: Prepare and insert the demand items
+                    if (processedItems.length > 0) {
+                        const demandItems = processedItems.map(item => ({
+                            demandid: demandData.id,
+                            productid: item.is_unregistered ? null : item.productid,
+                            unregistered_product_title: item.is_unregistered ? item.unregistered_product_title : null,
+                            unregistered_product_image_url: item.is_unregistered ? item.unregistered_product_image_url : null,
+                            quantity: Number(item.quantity),
+                            demand_admin_note: item.demand_admin_note,
+                            supply_admin_note: item.supply_admin_note,
+                            demandstatusid: item.is_unregistered ? pendingRegStatusId : defaultStatusId 
+                        }));
 
-                    const { data: insertedItems, error: itemsError } = await supabaseClient
-                        .from('demand_item')
-                        .insert(demandItems)
-                        .select();
+                        const { data: insertedItems, error: itemsError } = await supabaseClient
+                            .from('demand_item')
+                            .insert(demandItems)
+                            .select();
 
-                    if (itemsError) throw itemsError;
+                        if (itemsError) throw itemsError;
 
-                    // Step 3: Log the initial status for each newly created item
-                    const logsToInsert = insertedItems.map(item => ({
-                        demand_item_id: item.id,
-                        demandstatusid: defaultStatusId
-                    }));
+                        // Step 3: Log the initial status for each newly created item
+                        const logsToInsert = insertedItems.map(item => ({
+                            demand_item_id: item.id,
+                            demandstatusid: item.demandstatusid
+                        }));
 
-                    if (logsToInsert.length > 0) {
-                        const { error: logError } = await supabaseClient
-                            .from('demandstatuslog')
-                            .insert(logsToInsert);
+                        if (logsToInsert.length > 0) {
+                            const { error: logError } = await supabaseClient
+                                .from('demandstatuslog')
+                                .insert(logsToInsert);
 
-                        if (logError) {
-                            console.error("Error logging initial status:", logError);
+                            if (logError) {
+                                console.error("Error logging initial status:", logError);
+                            }
                         }
                     }
 
@@ -587,7 +628,6 @@
             };
             
             const customerOptions = customers.map(c => {
-                // نمایش تگ نقش در صورتی که کاربر چیزی غیر از مشتری عادی باشد
                 const roleTag = c.role?.title && c.role.title !== 'Customer' ? ` [${c.role.title}]` : '';
                 const displayName = formatProfileName(c);
                 const displayTitle = `${displayName} (${c.mobile || 'بدون شماره'})${roleTag}`;
@@ -600,7 +640,6 @@
                 );
                 const telegramCode = telegramCodeProp ? telegramCodeProp.value : '';
                 const displayTitle = `(ID: ${p.id}) ${telegramCode ? `[${telegramCode}] ` : ''}${p.brand ? p.brand.title + ' ' : ''}${p.title}`;
-                // ارسال تصویر به Select
                 return { id: p.id, title: displayTitle, image: p.image_url };
             });
 
@@ -652,8 +691,45 @@
                                 اقلام درخواستی 
                                 {isProductsLoading && <span className="text-xs font-normal text-indigo-500 bg-indigo-50 dark:bg-indigo-900/40 px-2 py-0.5 rounded-full flex items-center gap-1"><span className="spinner w-3 h-3 border-[1.5px] border-indigo-500 m-0"></span> در حال دریافت اطلاعات محصولات...</span>}
                             </h3>
+                            
                             <div className="space-y-3">
                                 {items.map((item, index) => {
+                                    if (item.is_unregistered) {
+                                        return (
+                                            <div key={item.key} className="p-3 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg border border-yellow-200 dark:border-yellow-700/50">
+                                                <div className="grid grid-cols-1 md:grid-cols-5 items-start gap-x-4 gap-y-3">
+                                                    <div className="md:col-span-3 flex gap-3 items-start">
+                                                        <div className="relative">
+                                                            {item.imagePreview ? (
+                                                                <img src={item.imagePreview} alt="پیش‌نمایش" className="w-16 h-16 rounded-md object-cover border border-yellow-300 dark:border-yellow-600 shadow-sm" />
+                                                            ) : (
+                                                                <div className="w-16 h-16 rounded-md bg-yellow-100 dark:bg-yellow-800/50 border border-yellow-200 dark:border-yellow-700 flex items-center justify-center text-[10px] text-yellow-600 dark:text-yellow-400 shadow-sm text-center leading-tight">بدون<br/>عکس</div>
+                                                            )}
+                                                            <div className="mt-1">
+                                                                <label className="cursor-pointer text-[10px] text-blue-600 hover:text-blue-800 bg-blue-50 px-1 py-0.5 rounded border border-blue-200 w-full text-center block">
+                                                                    آپلود عکس
+                                                                    <input type="file" accept="image/*" onChange={(e) => handleFileChange(index, e)} className="hidden" />
+                                                                </label>
+                                                            </div>
+                                                        </div>
+                                                        <div className="flex-1 mt-1">
+                                                            <label className="text-xs text-yellow-700 dark:text-yellow-500 block mb-1">نام کالا (به صورت دقیق)</label>
+                                                            <input type="text" value={item.unregistered_product_title} onChange={(e) => handleItemChange(index, 'unregistered_product_title', e.target.value)} className="w-full bg-white dark:bg-gray-800 p-2 rounded-lg text-sm border border-transparent focus:ring-1 focus:ring-yellow-500" placeholder="مثلا: اسپیکر KTS 1626" required />
+                                                        </div>
+                                                    </div>
+                                                    <div className="md:col-span-1 mt-1">
+                                                        <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">تعداد</label>
+                                                        <input type="number" value={item.quantity} onChange={(e) => handleItemChange(index, 'quantity', e.target.value)} className="w-full bg-white dark:bg-gray-800 p-2 rounded-lg text-sm border border-transparent focus:ring-1 focus:ring-yellow-500" placeholder="تعداد" min="1" required />
+                                                    </div>
+                                                    <div className="flex justify-end mt-1"><button type="button" onClick={() => handleRemoveItem(index)} className="text-red-500 hover:text-red-700 p-2 mb-1">✕</button></div>
+                                                </div>
+                                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-3">
+                                                    <textarea value={item.demand_admin_note} onChange={(e) => handleItemChange(index, 'demand_admin_note', e.target.value)} placeholder="یادداشت مدیر تقاضا (لینک کالا، مشخصات فنی و...)" className="w-full text-sm bg-white dark:bg-gray-800 p-2 rounded-lg border border-transparent focus:outline-none focus:ring-1 focus:ring-yellow-500" rows="2"></textarea>
+                                                </div>
+                                            </div>
+                                        );
+                                    }
+
                                     const prices = supplierPrices[item.productid] || [];
                                     const selectedProduct = products.find(p => p.id === item.productid);
                                     let productProperties = [];
@@ -715,7 +791,11 @@
                                     )
                                 })}
                             </div>
-                            <button type="button" onClick={handleAddItem} className="mt-4 w-full text-center py-2 px-4 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition font-semibold">+ افزودن کالا</button>
+                            
+                            <div className="flex flex-col sm:flex-row gap-3 mt-4">
+                                <button type="button" onClick={() => handleAddItem(false)} className="flex-1 text-center py-2 px-4 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition font-semibold text-gray-700 dark:text-gray-300">+ افزودن کالای موجود</button>
+                                <button type="button" onClick={() => handleAddItem(true)} className="flex-1 text-center py-2 px-4 border-2 border-dashed border-yellow-300 dark:border-yellow-600/50 rounded-lg hover:bg-yellow-50 dark:hover:bg-yellow-900/30 transition font-semibold text-yellow-600 dark:text-yellow-500">+ درخواست ثبت کالای جدید</button>
+                            </div>
                         </div>
                         
                         {error && <p className="text-red-500 text-sm">{error}</p>}
@@ -801,7 +881,6 @@
             const fetchStock = React.useCallback(async () => {
                 if(!itemToEdit?.product?.id) return;
                 
-                // ۱. دریافت موجودی تامین‌کنندگان با location_id
                 const { data: stockData, error: stockError } = await supabaseClient
                     .from('supplierstock')
                     .select('unitprice, quantity, lastupdatedat, supplieruserid, location_id, profiles:supplieruserid(fullname, firstname, mobile, emergencyphonenumber)')
@@ -816,7 +895,6 @@
                 if (stockData && stockData.length > 0) {
                     const supplierIds = [...new Set(stockData.map(s => s.supplieruserid))];
                     
-                    // ۲. دریافت انبارهای تامین‌کنندگان یافت شده
                     const { data: locData, error: locError } = await supabaseClient
                         .from('userlocation')
                         .select('userid, location(id, address, city(title, province(title)))')
@@ -824,7 +902,6 @@
                         
                     if (locError) console.error("Error fetching locations:", locError);
                     
-                    // ۳. ترکیب کردن موجودی هر تامین‌کننده با انبار متناظر (بر اساس location_id)
                     const combinedStock = [];
                     stockData.forEach(stock => {
                         let matchedLoc = null;
@@ -937,8 +1014,12 @@
                     // Fetch existing assignments
                     fetchAssignedSuppliers();
 
-                    // Fetch Suppliers with stock
-                    fetchStock();
+                    // Fetch Suppliers with stock ONLY IF IT'S A REGISTERED PRODUCT
+                    if (!itemToEdit.unregistered_product_title) {
+                        fetchStock();
+                    } else {
+                        setStockSuppliers([]);
+                    }
                 }
             }, [isOpen, itemToEdit, demand, fetchAssignedSuppliers, fetchStock]);
             
@@ -1295,299 +1376,307 @@
             };
 
             return (
-                <Modal isOpen={isOpen} onClose={onClose} title={`ویرایش آیتم: ${itemToEdit.product.title}`}>
-                    <div className="p-4 mb-4 bg-indigo-100 dark:bg-indigo-900/50 rounded-lg flex flex-col md:flex-row items-center gap-4 text-sm text-gray-800 dark:text-gray-200">
-                         {itemToEdit.product.image_url && (
+                <Modal isOpen={isOpen} onClose={onClose} title={itemToEdit.unregistered_product_title ? `ویرایش آیتم: ${itemToEdit.unregistered_product_title}` : `ویرایش آیتم: ${itemToEdit.product?.title || 'نامشخص'}`}>
+                    <div className={`p-4 mb-4 rounded-lg flex flex-col md:flex-row items-center gap-4 text-sm ${itemToEdit.unregistered_product_title ? 'bg-yellow-100 dark:bg-yellow-900/50 text-yellow-900 dark:text-yellow-100' : 'bg-indigo-100 dark:bg-indigo-900/50 text-gray-800 dark:text-gray-200'}`}>
+                         {itemToEdit.unregistered_product_image_url ? (
+                             <img src={itemToEdit.unregistered_product_image_url} alt="" loading="lazy" className="w-20 h-20 md:w-24 md:h-24 rounded-lg object-cover border border-yellow-300 dark:border-yellow-600 shadow-sm hover:scale-110 transition-transform duration-300" />
+                         ) : itemToEdit.product?.image_url ? (
                              <img src={itemToEdit.product.image_url} alt="" loading="lazy" className="w-20 h-20 md:w-24 md:h-24 rounded-lg object-cover border border-indigo-200 dark:border-indigo-700 shadow-sm hover:scale-110 transition-transform duration-300" />
+                         ) : (
+                             <div className={`w-20 h-20 md:w-24 md:h-24 rounded-lg border shadow-sm flex items-center justify-center text-xs text-center ${itemToEdit.unregistered_product_title ? 'bg-yellow-200/50 dark:bg-yellow-800 border-yellow-300 dark:border-yellow-600 text-yellow-700 dark:text-yellow-400' : 'bg-indigo-200/50 dark:bg-indigo-800 border-indigo-300 dark:border-indigo-600 text-indigo-700 dark:text-indigo-400'}`}>
+                                 {itemToEdit.unregistered_product_title ? 'بدون\nعکس' : 'بدون عکس'}
+                             </div>
                          )}
                          <div className="grid grid-cols-2 md:grid-cols-3 gap-4 flex-1 w-full text-right">
-                            <div><span className="font-semibold text-gray-600 dark:text-gray-400">مشتری:</span> {formatProfileName(demand.profiles)}</div>
-                            <div><span className="font-semibold text-gray-600 dark:text-gray-400">شهر:</span> {demand.location?.city?.title || '-'}</div>
-                            <div><span className="font-semibold text-gray-600 dark:text-gray-400">برند:</span> {itemToEdit.product.brand?.title || '-'}</div>
+                            <div><span className="font-semibold opacity-70">مشتری:</span> {formatProfileName(demand.profiles)}</div>
+                            <div><span className="font-semibold opacity-70">شهر:</span> {demand.location?.city?.title || '-'}</div>
+                            <div><span className="font-semibold opacity-70">برند:</span> {itemToEdit.product?.brand?.title || '-'}</div>
                          </div>
                     </div>
                     
                     {/* --- Assignment Section --- */}
-                    <div className="mb-6 border-b border-gray-200 dark:border-gray-700 pb-6">
-                        <h4 className="text-md font-bold text-gray-800 dark:text-gray-200 mb-3 flex items-center gap-2">
-                             <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-indigo-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0z" /></svg>
-                             مدیریت تامین‌کنندگان
-                        </h4>
-                        
-                        {/* List of assignments */}
-                        {isFetchingAssignments ? <p className="text-sm text-gray-500">در حال بارگذاری...</p> : (
-                            assignedSuppliers.length > 0 ? (
-                                <div className="border border-gray-200 dark:border-gray-700 rounded-lg max-h-40 overflow-y-auto mb-4">
-                                    <ul className="divide-y divide-gray-200 dark:divide-gray-700">
-                                        {assignedSuppliers.map(assignment => {
-                                            const supplier = assignment.profiles;
-                                            const location = assignment.location;
-                                            if (!supplier) return null;
-                                            const city = location?.city?.title || 'شهر نامشخص';
-                                            const province = location?.city?.province?.title || '';
-                                            const locationId = location?.id ? ` (کد انبار: ${location.id})` : '';
-                                            const locationString = (province ? `${province}، ${city}` : city) + locationId;
-                                            
-                                            return (
-                                                <li key={assignment.id} className="p-3 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700/50 flex justify-between items-center text-sm">
-                                                    <div className="flex-1">
-                                                        <div className="flex flex-wrap items-center gap-2">
-                                                            <span className="font-semibold text-gray-900 dark:text-gray-100">{formatProfileName(supplier)}</span>
-                                                            <span className="text-xs font-normal text-gray-500">({locationString})</span>
-                                                        </div>
-                                                        
-                                                        {(supplier.mobile || supplier.emergencyphonenumber) && (
-                                                            <div className="flex flex-wrap items-center gap-2 mt-1">
-                                                                {supplier.mobile && (
-                                                                    <a href={`tel:${supplier.mobile}`} className="flex items-center gap-1 text-xs font-mono tracking-wider text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded-md hover:bg-green-100 hover:text-green-700 dark:hover:bg-green-900/30 dark:hover:text-green-400 transition-colors group">
-                                                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 text-gray-400 group-hover:text-green-600 dark:group-hover:text-green-400" viewBox="0 0 20 20" fill="currentColor">
-                                                                            <path d="M2 3a1 1 0 011-1h2.153a1 1 0 01.986.836l.74 4.435a1 1 0 01-.54 1.06l-1.548.773a11.037 11.037 0 006.105 6.105l.774-1.548a1 1 0 011.059-.54l4.435.74a1 1 0 01.836.986V17a1 1 0 01-1 1h-2C7.82 18 2 12.18 2 5V3z" />
-                                                                        </svg>
-                                                                        {supplier.mobile}
-                                                                    </a>
-                                                                )}
-                                                                {supplier.emergencyphonenumber && (
-                                                                    <a href={`tel:${supplier.emergencyphonenumber}`} className="flex items-center gap-1 text-xs font-mono tracking-wider text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded-md hover:bg-green-100 hover:text-green-700 dark:hover:bg-green-900/30 dark:hover:text-green-400 transition-colors group">
-                                                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 text-gray-400 group-hover:text-green-600 dark:group-hover:text-green-400" viewBox="0 0 20 20" fill="currentColor">
-                                                                            <path d="M2 3a1 1 0 011-1h2.153a1 1 0 01.986.836l.74 4.435a1 1 0 01-.54 1.06l-1.548.773a11.037 11.037 0 006.105 6.105l.774-1.548a1 1 0 011.059-.54l4.435.74a1 1 0 01.836.986V17a1 1 0 01-1 1h-2C7.82 18 2 12.18 2 5V3z" />
-                                                                        </svg>
-                                                                        {supplier.emergencyphonenumber}
-                                                                    </a>
-                                                                )}
+                    {!itemToEdit.unregistered_product_title && (
+                        <div className="mb-6 border-b border-gray-200 dark:border-gray-700 pb-6">
+                            <h4 className="text-md font-bold text-gray-800 dark:text-gray-200 mb-3 flex items-center gap-2">
+                                 <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-indigo-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0z" /></svg>
+                                 مدیریت تامین‌کنندگان
+                            </h4>
+                            
+                            {/* List of assignments */}
+                            {isFetchingAssignments ? <p className="text-sm text-gray-500">در حال بارگذاری...</p> : (
+                                assignedSuppliers.length > 0 ? (
+                                    <div className="border border-gray-200 dark:border-gray-700 rounded-lg max-h-40 overflow-y-auto mb-4">
+                                        <ul className="divide-y divide-gray-200 dark:divide-gray-700">
+                                            {assignedSuppliers.map(assignment => {
+                                                const supplier = assignment.profiles;
+                                                const location = assignment.location;
+                                                if (!supplier) return null;
+                                                const city = location?.city?.title || 'شهر نامشخص';
+                                                const province = location?.city?.province?.title || '';
+                                                const locationId = location?.id ? ` (کد انبار: ${location.id})` : '';
+                                                const locationString = (province ? `${province}، ${city}` : city) + locationId;
+                                                
+                                                return (
+                                                    <li key={assignment.id} className="p-3 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700/50 flex justify-between items-center text-sm">
+                                                        <div className="flex-1">
+                                                            <div className="flex flex-wrap items-center gap-2">
+                                                                <span className="font-semibold text-gray-900 dark:text-gray-100">{formatProfileName(supplier)}</span>
+                                                                <span className="text-xs font-normal text-gray-500">({locationString})</span>
                                                             </div>
-                                                        )}
+                                                            
+                                                            {(supplier.mobile || supplier.emergencyphonenumber) && (
+                                                                <div className="flex flex-wrap items-center gap-2 mt-1">
+                                                                    {supplier.mobile && (
+                                                                        <a href={`tel:${supplier.mobile}`} className="flex items-center gap-1 text-xs font-mono tracking-wider text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded-md hover:bg-green-100 hover:text-green-700 dark:hover:bg-green-900/30 dark:hover:text-green-400 transition-colors group">
+                                                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 text-gray-400 group-hover:text-green-600 dark:group-hover:text-green-400" viewBox="0 0 20 20" fill="currentColor">
+                                                                                <path d="M2 3a1 1 0 011-1h2.153a1 1 0 01.986.836l.74 4.435a1 1 0 01-.54 1.06l-1.548.773a11.037 11.037 0 006.105 6.105l.774-1.548a1 1 0 011.059-.54l4.435.74a1 1 0 01.836.986V17a1 1 0 01-1 1h-2C7.82 18 2 12.18 2 5V3z" />
+                                                                            </svg>
+                                                                            {supplier.mobile}
+                                                                        </a>
+                                                                    )}
+                                                                    {supplier.emergencyphonenumber && (
+                                                                        <a href={`tel:${supplier.emergencyphonenumber}`} className="flex items-center gap-1 text-xs font-mono tracking-wider text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded-md hover:bg-green-100 hover:text-green-700 dark:hover:bg-green-900/30 dark:hover:text-green-400 transition-colors group">
+                                                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 text-gray-400 group-hover:text-green-600 dark:group-hover:text-green-400" viewBox="0 0 20 20" fill="currentColor">
+                                                                                <path d="M2 3a1 1 0 011-1h2.153a1 1 0 01.986.836l.74 4.435a1 1 0 01-.54 1.06l-1.548.773a11.037 11.037 0 006.105 6.105l.774-1.548a1 1 0 011.059-.54l4.435.74a1 1 0 01.836.986V17a1 1 0 01-1 1h-2C7.82 18 2 12.18 2 5V3z" />
+                                                                            </svg>
+                                                                            {supplier.emergencyphonenumber}
+                                                                        </a>
+                                                                    )}
+                                                                </div>
+                                                            )}
 
-                                                        <div className="text-xs text-gray-500 mt-1">
-                                                            تعداد: <span className="font-mono font-bold text-gray-700 dark:text-gray-300">{assignment.assigned_quantity}</span> | قیمت: <span className="font-mono font-bold text-green-600">{formatCurrency(assignment.assigned_price)}</span>
+                                                            <div className="text-xs text-gray-500 mt-1">
+                                                                تعداد: <span className="font-mono font-bold text-gray-700 dark:text-gray-300">{assignment.assigned_quantity}</span> | قیمت: <span className="font-mono font-bold text-green-600">{formatCurrency(assignment.assigned_price)}</span>
+                                                            </div>
+                                                            {(() => {
+                                                                const stockInfo = stockSuppliers.find(s => s.supplieruserid === assignment.supplieruserid && s.locationid === (assignment.location?.id || null));
+                                                                if (stockInfo) {
+                                                                    return (
+                                                                        <div className="text-[10px] text-indigo-600 dark:text-indigo-400 mt-1.5 flex items-center gap-3 font-bold bg-indigo-50 dark:bg-indigo-900/30 w-fit px-2 py-0.5 rounded border border-indigo-100 dark:border-indigo-800">
+                                                                            <span>موجودی لحظه‌ای: {stockInfo.quantity || 'نامشخص'}</span>
+                                                                            <span>بروزرسانی: {timeAgo(stockInfo.lastupdatedat) || 'نامشخص'}</span>
+                                                                        </div>
+                                                                    );
+                                                                }
+                                                                return null;
+                                                            })()}
                                                         </div>
-                                                        {(() => {
-                                                            const stockInfo = stockSuppliers.find(s => s.supplieruserid === assignment.supplieruserid && s.locationid === (assignment.location?.id || null));
-                                                            if (stockInfo) {
-                                                                return (
-                                                                    <div className="text-[10px] text-indigo-600 dark:text-indigo-400 mt-1.5 flex items-center gap-3 font-bold bg-indigo-50 dark:bg-indigo-900/30 w-fit px-2 py-0.5 rounded border border-indigo-100 dark:border-indigo-800">
-                                                                        <span>موجودی لحظه‌ای: {stockInfo.quantity || 'نامشخص'}</span>
-                                                                        <span>بروزرسانی: {timeAgo(stockInfo.lastupdatedat) || 'نامشخص'}</span>
-                                                                    </div>
-                                                                );
-                                                            }
-                                                            return null;
-                                                        })()}
-                                                    </div>
-                                                    <button onClick={() => handleDeleteAssignment(assignment.id)} className="text-red-500 hover:text-red-700 p-2 mr-2" title="حذف تخصیص">
-                                                         <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm4 0a1 1 0 012 0v6a1 1 0 11-2 0V8z" clipRule="evenodd" /></svg>
-                                                    </button>
-                                                </li>
-                                            );
-                                        })}
-                                    </ul>
-                                </div>
-                            ) : (
-                                <p className="text-sm text-gray-500 bg-gray-100 dark:bg-gray-700 p-2 rounded-md mb-4">تامین‌کننده‌ای تخصیص داده نشده است.</p>
-                            )
-                        )}
-                        
-                        {/* New Assignment Form */}
-                        <div className="bg-gray-50 dark:bg-gray-700/30 p-3 rounded-lg border border-gray-200 dark:border-gray-700">
-                             <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-4 border-b border-gray-200 dark:border-gray-600 pb-2">
-                                 <h5 className="text-sm font-semibold text-indigo-700 dark:text-indigo-400">تخصیص تامین‌کننده:</h5>
-                                 <div className="flex gap-4 mt-2 sm:mt-0">
-                                     <label className="flex items-center gap-2 text-xs cursor-pointer text-gray-700 dark:text-gray-300">
-                                         <input type="radio" name="assignmentMode" value="existing" checked={assignmentMode === 'existing'} onChange={() => setAssignmentMode('existing')} className="text-indigo-600 focus:ring-indigo-500" />
-                                         بررسی و انتخاب از موجودی
-                                     </label>
-                                     <label className="flex items-center gap-2 text-xs cursor-pointer text-gray-700 dark:text-gray-300">
-                                         <input type="radio" name="assignmentMode" value="new" checked={assignmentMode === 'new'} onChange={() => setAssignmentMode('new')} className="text-indigo-600 focus:ring-indigo-500" />
-                                         تعریف تامین‌کننده جدید
-                                     </label>
+                                                        <button onClick={() => handleDeleteAssignment(assignment.id)} className="text-red-500 hover:text-red-700 p-2 mr-2" title="حذف تخصیص">
+                                                             <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm4 0a1 1 0 012 0v6a1 1 0 11-2 0V8z" clipRule="evenodd" /></svg>
+                                                        </button>
+                                                    </li>
+                                                );
+                                            })}
+                                        </ul>
+                                    </div>
+                                ) : (
+                                    <p className="text-sm text-gray-500 bg-gray-100 dark:bg-gray-700 p-2 rounded-md mb-4">تامین‌کننده‌ای تخصیص داده نشده است.</p>
+                                )
+                            )}
+                            
+                            {/* New Assignment Form */}
+                            <div className="bg-gray-50 dark:bg-gray-700/30 p-3 rounded-lg border border-gray-200 dark:border-gray-700">
+                                 <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-4 border-b border-gray-200 dark:border-gray-600 pb-2">
+                                     <h5 className="text-sm font-semibold text-indigo-700 dark:text-indigo-400">تخصیص تامین‌کننده:</h5>
+                                     <div className="flex gap-4 mt-2 sm:mt-0">
+                                         <label className="flex items-center gap-2 text-xs cursor-pointer text-gray-700 dark:text-gray-300">
+                                             <input type="radio" name="assignmentMode" value="existing" checked={assignmentMode === 'existing'} onChange={() => setAssignmentMode('existing')} className="text-indigo-600 focus:ring-indigo-500" />
+                                             بررسی و انتخاب از موجودی
+                                         </label>
+                                         <label className="flex items-center gap-2 text-xs cursor-pointer text-gray-700 dark:text-gray-300">
+                                             <input type="radio" name="assignmentMode" value="new" checked={assignmentMode === 'new'} onChange={() => setAssignmentMode('new')} className="text-indigo-600 focus:ring-indigo-500" />
+                                             تعریف تامین‌کننده جدید
+                                         </label>
+                                     </div>
                                  </div>
-                             </div>
 
-                             {assignmentMode === 'existing' ? (
-                                 <div className="flex flex-col gap-4 mb-2 max-h-96 overflow-y-auto pr-2">
-                                     {stockSuppliers.length === 0 ? (
-                                         <div className="text-sm text-yellow-600 p-3 bg-yellow-50 dark:bg-yellow-900/30 rounded border border-yellow-200 dark:border-yellow-700">هیچ تامین‌کننده‌ای موجودی این کالا را در سیستم ثبت نکرده است.</div>
-                                     ) : (
-                                         stockSuppliers.map(s => {
-                                             const locId = s.locationid || 'null';
-                                             const key = `${s.supplieruserid}_${locId}`;
-                                             const inputs = stockInputs[key] || { price: s.unitprice || '', quantity: '' };
-                                             const cityName = s.location?.city?.title || 'بدون شهر';
-                                             const locString = `${cityName} - کد انبار ${locId}`;
-                                             
-                                             const supplierName = formatProfileName(s.profiles);
-                                             const productFullName = `${itemToEdit.product.brand ? itemToEdit.product.brand.title + ' ' : ''}${itemToEdit.product.title}`;
-                                             
-                                             const contactText = `سلام ${supplierName}\n❓️استعلام موجودی و قیمت \n${productFullName}\nتعداد ${itemToEdit.quantity} عدد \nکد بازاریو: ${itemToEdit.product.id}\nخانم سبحانی فر\nشناسه تقاضا : ${demand.id}`;
-                                             const encodedContactText = encodeURIComponent(contactText);
+                                 {assignmentMode === 'existing' ? (
+                                     <div className="flex flex-col gap-4 mb-2 max-h-96 overflow-y-auto pr-2">
+                                         {stockSuppliers.length === 0 ? (
+                                             <div className="text-sm text-yellow-600 p-3 bg-yellow-50 dark:bg-yellow-900/30 rounded border border-yellow-200 dark:border-yellow-700">هیچ تامین‌کننده‌ای موجودی این کالا را در سیستم ثبت نکرده است.</div>
+                                         ) : (
+                                             stockSuppliers.map(s => {
+                                                 const locId = s.locationid || 'null';
+                                                 const key = `${s.supplieruserid}_${locId}`;
+                                                 const inputs = stockInputs[key] || { price: s.unitprice || '', quantity: '' };
+                                                 const cityName = s.location?.city?.title || 'بدون شهر';
+                                                 const locString = `${cityName} - کد انبار ${locId}`;
+                                                 
+                                                 const supplierName = formatProfileName(s.profiles);
+                                                 const productFullName = `${itemToEdit.product.brand ? itemToEdit.product.brand.title + ' ' : ''}${itemToEdit.product.title}`;
+                                                 
+                                                 const contactText = `سلام ${supplierName}\n❓️استعلام موجودی و قیمت \n${productFullName}\nتعداد ${itemToEdit.quantity} عدد \nکد بازاریو: ${itemToEdit.product.id}\nخانم سبحانی فر\nشناسه تقاضا : ${demand.id}`;
+                                                 const encodedContactText = encodeURIComponent(contactText);
 
-                                             return (
-                                                 <div key={key} className="bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-xl p-4 shadow-sm hover:shadow-md transition-shadow flex flex-col gap-4">
-                                                     {/* Header */}
-                                                     <div className="flex flex-col gap-2 border-b border-gray-100 dark:border-gray-700 pb-3">
-                                                         <div className="flex justify-between items-center">
-                                                             <div className="font-bold text-gray-800 dark:text-gray-200">
-                                                                 {formatProfileName(s.profiles)} <span className="text-sm font-normal text-gray-500 dark:text-gray-400">({locString})</span>
+                                                 return (
+                                                     <div key={key} className="bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-xl p-4 shadow-sm hover:shadow-md transition-shadow flex flex-col gap-4">
+                                                         {/* Header */}
+                                                         <div className="flex flex-col gap-2 border-b border-gray-100 dark:border-gray-700 pb-3">
+                                                             <div className="flex justify-between items-center">
+                                                                 <div className="font-bold text-gray-800 dark:text-gray-200">
+                                                                     {formatProfileName(s.profiles)} <span className="text-sm font-normal text-gray-500 dark:text-gray-400">({locString})</span>
+                                                                 </div>
                                                              </div>
-                                                         </div>
-                                                         {/* نمایش و قابلیت کلیک روی شماره تماس‌های تامین‌کننده */}
-                                                         {(s.profiles?.mobile || s.profiles?.emergencyphonenumber) && (
-                                                             <div className="flex flex-wrap gap-2">
-                                                                 {s.profiles?.mobile && (
-                                                                     <a href={`tel:${s.profiles.mobile}`} className="flex items-center gap-1.5 text-xs font-mono tracking-wider text-indigo-700 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/30 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 px-2.5 py-1.5 rounded-md transition-colors border border-indigo-200 dark:border-indigo-800/50" dir="ltr" title="تماس با موبایل">
-                                                                         <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor"><path d="M2 3a1 1 0 011-1h2.153a1 1 0 01.986.836l.74 4.435a1 1 0 01-.54 1.06l-1.548.773a11.037 11.037 0 006.105 6.105l.774-1.548a1 1 0 011.059-.54l4.435.74a1 1 0 01.836.986V17a1 1 0 01-1 1h-2C7.82 18 2 12.18 2 5V3z" /></svg>
-                                                                         {s.profiles.mobile}
-                                                                     </a>
-                                                                 )}
-                                                                 {s.profiles?.emergencyphonenumber && (
-                                                                     <a href={`tel:${s.profiles.emergencyphonenumber}`} className="flex items-center gap-1.5 text-xs font-mono tracking-wider text-indigo-700 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/30 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 px-2.5 py-1.5 rounded-md transition-colors border border-indigo-200 dark:border-indigo-800/50" dir="ltr" title="تماس با شماره دوم">
-                                                                         <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor"><path d="M2 3a1 1 0 011-1h2.153a1 1 0 01.986.836l.74 4.435a1 1 0 01-.54 1.06l-1.548.773a11.037 11.037 0 006.105 6.105l.774-1.548a1 1 0 011.059-.54l4.435.74a1 1 0 01.836.986V17a1 1 0 01-1 1h-2C7.82 18 2 12.18 2 5V3z" /></svg>
-                                                                         {s.profiles.emergencyphonenumber}
-                                                                     </a>
-                                                                 )}
-                                                             </div>
-                                                         )}
-                                                     </div>
-
-                                                     {/* Body */}
-                                                     <div className="flex flex-col lg:flex-row gap-6 items-start lg:items-center">
-                                                         
-                                                         {/* Info Block */}
-                                                         <div className="w-full lg:w-auto bg-gray-50 dark:bg-gray-700/50 p-3 rounded-lg text-sm space-y-1.5 min-w-[200px]">
-                                                             <div className="flex justify-between">
-                                                                 <span className="text-gray-500 dark:text-gray-400">قیمت اصلی:</span>
-                                                                 <span className="font-mono font-semibold text-gray-800 dark:text-gray-200">{formatCurrency(s.unitprice)}</span>
-                                                             </div>
-                                                             <div className="flex justify-between">
-                                                                 <span className="text-gray-500 dark:text-gray-400">تاریخ بروزرسانی:</span>
-                                                                 <span className="text-gray-700 dark:text-gray-300">{formatDateTime(s.lastupdatedat, false)} <span className="text-[10px] text-gray-400">({timeAgo(s.lastupdatedat)})</span></span>
-                                                             </div>
-                                                             <div className="flex justify-between">
-                                                                 <span className="text-gray-500 dark:text-gray-400">موجودی انبار:</span>
-                                                                 <span className="font-mono font-bold text-indigo-600 dark:text-indigo-400">{s.quantity || '?'}</span>
-                                                             </div>
-                                                         </div>
-
-                                                         {/* Inputs */}
-                                                         <div className="flex-1 w-full grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                                             <div>
-                                                                 <label className="block text-xs font-medium text-gray-600 dark:text-gray-300 mb-1 text-center">قیمت جدید (تومان)</label>
-                                                                 <input 
-                                                                     type="number" 
-                                                                     value={inputs.price} 
-                                                                     onChange={e => handleStockCardChange(key, 'price', e.target.value)} 
-                                                                     className="w-full text-center text-sm p-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 font-mono font-bold text-gray-800 dark:text-white" 
-                                                                 />
-                                                                 <button 
-                                                                     type="button" 
-                                                                     onClick={() => handleUpdateStockPrice(s.supplieruserid, locId, inputs.price)}
-                                                                     disabled={isAssigning}
-                                                                     className="w-full mt-2 text-xs bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 py-1.5 rounded transition"
-                                                                 >
-                                                                     فقط بروزرسانی قیمت
-                                                                 </button>
-                                                             </div>
-                                                             <div>
-                                                                 <label className="block text-xs font-medium text-gray-600 dark:text-gray-300 mb-1 text-center">تعداد تخصیص</label>
-                                                                 <input 
-                                                                     type="number" 
-                                                                     value={inputs.quantity} 
-                                                                     onChange={e => handleStockCardChange(key, 'quantity', e.target.value)} 
-                                                                     className="w-full text-center text-sm p-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 font-mono font-bold text-gray-800 dark:text-white" 
-                                                                 />
-                                                                 <button 
-                                                                     type="button" 
-                                                                     onClick={() => handleCardAssignment(s.supplieruserid, locId, inputs.price, inputs.quantity)}
-                                                                     disabled={isAssigning}
-                                                                     className="w-full mt-2 text-xs bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-1.5 rounded transition disabled:bg-indigo-400"
-                                                                 >
-                                                                     ثبت تخصیص
-                                                                 </button>
-                                                             </div>
-                                                         </div>
-
-                                                         {/* Action Buttons */}
-                                                         <div className="flex lg:flex-col gap-2 w-full lg:w-auto justify-center">
-                                                             {s.profiles?.mobile && (
-                                                                 <a href={`https://wa.me/98${s.profiles.mobile.startsWith('0') ? s.profiles.mobile.substring(1) : s.profiles.mobile}?text=${encodedContactText}`} target="_blank" rel="noreferrer" className="bg-green-500 hover:bg-green-600 text-white p-2.5 rounded-full flex items-center justify-center transition" title="ارسال پیام استعلام در واتساپ">
-                                                                     <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" viewBox="0 0 16 16">
-                                                                         <path d="M13.601 2.326A7.854 7.854 0 0 0 7.994 0C3.627 0 .068 3.558.064 7.926c0 1.399.366 2.76 1.057 3.965L0 16l4.204-1.102a7.933 7.933 0 0 0 3.79.965h.004c4.368 0 7.926-3.558 7.93-7.93A7.898 7.898 0 0 0 13.6 2.326zM7.994 14.521a6.573 6.573 0 0 1-3.356-.92l-.24-.144-2.494.654.666-2.433-.156-.251a6.56 6.56 0 0 1-1.007-3.505c0-3.626 2.957-6.584 6.591-6.584a6.56 6.56 0 0 1 4.66 1.931 6.557 6.557 0 0 1 1.928 4.66c-.004 3.639-2.961 6.592-6.592 6.592zm3.615-4.934c-.197-.099-1.17-.578-1.353-.646-.182-.065-.315-.099-.445.099-.133.197-.513.646-.627.775-.114.133-.232.148-.43.05-.197-.1-.836-.308-1.592-.985-.59-.525-.985-1.175-1.103-1.372-.114-.198-.011-.304.088-.403.087-.088.197-.232.296-.346.1-.114.133-.198.198-.33.065-.134.034-.248-.015-.347-.05-.099-.445-1.076-.612-1.47-.16-.389-.323-.335-.445-.34-.114-.007-.247-.007-.38-.007a.729.729 0 0 0-.529.247c-.182.198-.691.677-.691 1.654 0 .977.71 1.916.81 2.049.098.133 1.394 2.132 3.383 2.992.47.205.84.326 1.129.418.475.152.904.129 1.246.08.38-.058 1.171-.48 1.338-.943.164-.464.164-.86.114-.943-.049-.084-.182-.133-.38-.232z"/>
-                                                                     </svg>
-                                                                 </a>
+                                                             {/* نمایش و قابلیت کلیک روی شماره تماس‌های تامین‌کننده */}
+                                                             {(s.profiles?.mobile || s.profiles?.emergencyphonenumber) && (
+                                                                 <div className="flex flex-wrap gap-2">
+                                                                     {s.profiles?.mobile && (
+                                                                         <a href={`tel:${s.profiles.mobile}`} className="flex items-center gap-1.5 text-xs font-mono tracking-wider text-indigo-700 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/30 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 px-2.5 py-1.5 rounded-md transition-colors border border-indigo-200 dark:border-indigo-800/50" dir="ltr" title="تماس با موبایل">
+                                                                             <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor"><path d="M2 3a1 1 0 011-1h2.153a1 1 0 01.986.836l.74 4.435a1 1 0 01-.54 1.06l-1.548.773a11.037 11.037 0 006.105 6.105l.774-1.548a1 1 0 011.059-.54l4.435.74a1 1 0 01.836.986V17a1 1 0 01-1 1h-2C7.82 18 2 12.18 2 5V3z" /></svg>
+                                                                             {s.profiles.mobile}
+                                                                         </a>
+                                                                     )}
+                                                                     {s.profiles?.emergencyphonenumber && (
+                                                                         <a href={`tel:${s.profiles.emergencyphonenumber}`} className="flex items-center gap-1.5 text-xs font-mono tracking-wider text-indigo-700 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/30 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 px-2.5 py-1.5 rounded-md transition-colors border border-indigo-200 dark:border-indigo-800/50" dir="ltr" title="تماس با شماره دوم">
+                                                                             <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor"><path d="M2 3a1 1 0 011-1h2.153a1 1 0 01.986.836l.74 4.435a1 1 0 01-.54 1.06l-1.548.773a11.037 11.037 0 006.105 6.105l.774-1.548a1 1 0 011.059-.54l4.435.74a1 1 0 01.836.986V17a1 1 0 01-1 1h-2C7.82 18 2 12.18 2 5V3z" /></svg>
+                                                                             {s.profiles.emergencyphonenumber}
+                                                                         </a>
+                                                                     )}
+                                                                 </div>
                                                              )}
-                                                             <button 
-                                                                 type="button" 
-                                                                 onClick={() => {
-                                                                     navigator.clipboard.writeText(contactText);
-                                                                     addToast("متن استعلام کپی شد", "success");
-                                                                 }} 
-                                                                 className="bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 p-2.5 rounded-full flex items-center justify-center transition" 
-                                                                 title="کپی پیام استعلام"
-                                                             >
-                                                                 <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
-                                                             </button>
+                                                         </div>
+
+                                                         {/* Body */}
+                                                         <div className="flex flex-col lg:flex-row gap-6 items-start lg:items-center">
+                                                             
+                                                             {/* Info Block */}
+                                                             <div className="w-full lg:w-auto bg-gray-50 dark:bg-gray-700/50 p-3 rounded-lg text-sm space-y-1.5 min-w-[200px]">
+                                                                 <div className="flex justify-between">
+                                                                     <span className="text-gray-500 dark:text-gray-400">قیمت اصلی:</span>
+                                                                     <span className="font-mono font-semibold text-gray-800 dark:text-gray-200">{formatCurrency(s.unitprice)}</span>
+                                                                 </div>
+                                                                 <div className="flex justify-between">
+                                                                     <span className="text-gray-500 dark:text-gray-400">تاریخ بروزرسانی:</span>
+                                                                     <span className="text-gray-700 dark:text-gray-300">{formatDateTime(s.lastupdatedat, false)} <span className="text-[10px] text-gray-400">({timeAgo(s.lastupdatedat)})</span></span>
+                                                                 </div>
+                                                                 <div className="flex justify-between">
+                                                                     <span className="text-gray-500 dark:text-gray-400">موجودی انبار:</span>
+                                                                     <span className="font-mono font-bold text-indigo-600 dark:text-indigo-400">{s.quantity || '?'}</span>
+                                                                 </div>
+                                                             </div>
+
+                                                             {/* Inputs */}
+                                                             <div className="flex-1 w-full grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                                                 <div>
+                                                                     <label className="block text-xs font-medium text-gray-600 dark:text-gray-300 mb-1 text-center">قیمت جدید (تومان)</label>
+                                                                     <input 
+                                                                         type="number" 
+                                                                         value={inputs.price} 
+                                                                         onChange={e => handleStockCardChange(key, 'price', e.target.value)} 
+                                                                         className="w-full text-center text-sm p-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 font-mono font-bold text-gray-800 dark:text-white" 
+                                                                     />
+                                                                     <button 
+                                                                         type="button" 
+                                                                         onClick={() => handleUpdateStockPrice(s.supplieruserid, locId, inputs.price)}
+                                                                         disabled={isAssigning}
+                                                                         className="w-full mt-2 text-xs bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 py-1.5 rounded transition"
+                                                                     >
+                                                                         فقط بروزرسانی قیمت
+                                                                     </button>
+                                                                 </div>
+                                                                 <div>
+                                                                     <label className="block text-xs font-medium text-gray-600 dark:text-gray-300 mb-1 text-center">تعداد تخصیص</label>
+                                                                     <input 
+                                                                         type="number" 
+                                                                         value={inputs.quantity} 
+                                                                         onChange={e => handleStockCardChange(key, 'quantity', e.target.value)} 
+                                                                         className="w-full text-center text-sm p-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 font-mono font-bold text-gray-800 dark:text-white" 
+                                                                     />
+                                                                     <button 
+                                                                         type="button" 
+                                                                         onClick={() => handleCardAssignment(s.supplieruserid, locId, inputs.price, inputs.quantity)}
+                                                                         disabled={isAssigning}
+                                                                         className="w-full mt-2 text-xs bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-1.5 rounded transition disabled:bg-indigo-400"
+                                                                     >
+                                                                         ثبت تخصیص
+                                                                     </button>
+                                                                 </div>
+                                                             </div>
+
+                                                             {/* Action Buttons */}
+                                                             <div className="flex lg:flex-col gap-2 w-full lg:w-auto justify-center">
+                                                                 {s.profiles?.mobile && (
+                                                                     <a href={`https://wa.me/98${s.profiles.mobile.startsWith('0') ? s.profiles.mobile.substring(1) : s.profiles.mobile}?text=${encodedContactText}`} target="_blank" rel="noreferrer" className="bg-green-500 hover:bg-green-600 text-white p-2.5 rounded-full flex items-center justify-center transition" title="ارسال پیام استعلام در واتساپ">
+                                                                         <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" viewBox="0 0 16 16">
+                                                                             <path d="M13.601 2.326A7.854 7.854 0 0 0 7.994 0C3.627 0 .068 3.558.064 7.926c0 1.399.366 2.76 1.057 3.965L0 16l4.204-1.102a7.933 7.933 0 0 0 3.79.965h.004c4.368 0 7.926-3.558 7.93-7.93A7.898 7.898 0 0 0 13.6 2.326zM7.994 14.521a6.573 6.573 0 0 1-3.356-.92l-.24-.144-2.494.654.666-2.433-.156-.251a6.56 6.56 0 0 1-1.007-3.505c0-3.626 2.957-6.584 6.591-6.584a6.56 6.56 0 0 1 4.66 1.931 6.557 6.557 0 0 1 1.928 4.66c-.004 3.639-2.961 6.592-6.592 6.592zm3.615-4.934c-.197-.099-1.17-.578-1.353-.646-.182-.065-.315-.099-.445.099-.133.197-.513.646-.627.775-.114.133-.232.148-.43.05-.197-.1-.836-.308-1.592-.985-.59-.525-.985-1.175-1.103-1.372-.114-.198-.011-.304.088-.403.087-.088.197-.232.296-.346.1-.114.133-.198.198-.33.065-.134.034-.248-.015-.347-.05-.099-.445-1.076-.612-1.47-.16-.389-.323-.335-.445-.34-.114-.007-.247-.007-.38-.007a.729.729 0 0 0-.529.247c-.182.198-.691.677-.691 1.654 0 .977.71 1.916.81 2.049.098.133 1.394 2.132 3.383 2.992.47.205.84.326 1.129.418.475.152.904.129 1.246.08.38-.058 1.171-.48 1.338-.943.164-.464.164-.86.114-.943-.049-.084-.182-.133-.38-.232z"/>
+                                                                         </svg>
+                                                                     </a>
+                                                                 )}
+                                                                 <button 
+                                                                     type="button" 
+                                                                     onClick={() => {
+                                                                         navigator.clipboard.writeText(contactText);
+                                                                         addToast("متن استعلام کپی شد", "success");
+                                                                     }} 
+                                                                     className="bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 p-2.5 rounded-full flex items-center justify-center transition" 
+                                                                     title="کپی پیام استعلام"
+                                                                 >
+                                                                     <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
+                                                                 </button>
+                                                             </div>
                                                          </div>
                                                      </div>
-                                                 </div>
-                                             );
-                                         })
-                                     )}
-                                 </div>
-                             ) : (
-                                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
-                                     <div className="md:col-span-3 grid grid-cols-1 sm:grid-cols-2 gap-3 bg-indigo-50/50 dark:bg-indigo-900/10 p-3 rounded border border-indigo-100 dark:border-indigo-800/30 mb-1">
-                                         <div>
-                                             <label className="block text-xs font-medium text-gray-600 dark:text-gray-300 mb-1 flex justify-between">
-                                                 <span>جستجو و انتخاب تامین‌کننده و انبار</span>
-                                                 {isFetchingNewLocs && <span className="text-indigo-500 text-[10px]">در حال بارگذاری...</span>}
-                                             </label>
-                                             <SearchableSelect 
-                                                 options={combinedProfileLocs} 
-                                                 value={selectedCombinedLocId} 
-                                                 onChange={(val) => {
-                                                     setSelectedCombinedLocId(val);
-                                                     const selected = combinedProfileLocs.find(c => c.id === val);
-                                                     if (selected) {
-                                                         setNewSupplierId(selected.supplierId);
-                                                         setNewSupplierLocId(selected.locationId);
-                                                     } else {
-                                                         setNewSupplierId('');
-                                                         setNewSupplierLocId('');
-                                                     }
-                                                 }} 
-                                                 placeholder="جستجوی تامین‌کننده..." 
-                                                 disabled={isFetchingNewLocs}
-                                             />
-                                         </div>
-                                         <div>
-                                              <label className="block text-xs font-medium text-gray-600 dark:text-gray-300 mb-1">موجودی اولیه انبار</label>
-                                              <input 
-                                                  type="number" 
-                                                  value={newSupplierStockQuantity} 
-                                                  onChange={e => setNewSupplierStockQuantity(e.target.value)} 
-                                                  className="w-full text-sm p-2 rounded border-gray-300 bg-white dark:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500" 
-                                                  min="0" 
-                                                  placeholder="مثلاً 100" 
-                                              />
-                                         </div>
+                                                 );
+                                             })
+                                         )}
                                      </div>
+                                 ) : (
+                                     <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
+                                         <div className="md:col-span-3 grid grid-cols-1 sm:grid-cols-2 gap-3 bg-indigo-50/50 dark:bg-indigo-900/10 p-3 rounded border border-indigo-100 dark:border-indigo-800/30 mb-1">
+                                             <div>
+                                                 <label className="block text-xs font-medium text-gray-600 dark:text-gray-300 mb-1 flex justify-between">
+                                                     <span>جستجو و انتخاب تامین‌کننده و انبار</span>
+                                                     {isFetchingNewLocs && <span className="text-indigo-500 text-[10px]">در حال بارگذاری...</span>}
+                                                 </label>
+                                                 <SearchableSelect 
+                                                     options={combinedProfileLocs} 
+                                                     value={selectedCombinedLocId} 
+                                                     onChange={(val) => {
+                                                         setSelectedCombinedLocId(val);
+                                                         const selected = combinedProfileLocs.find(c => c.id === val);
+                                                         if (selected) {
+                                                             setNewSupplierId(selected.supplierId);
+                                                             setNewSupplierLocId(selected.locationId);
+                                                         } else {
+                                                             setNewSupplierId('');
+                                                             setNewSupplierLocId('');
+                                                         }
+                                                     }} 
+                                                     placeholder="جستجوی تامین‌کننده..." 
+                                                     disabled={isFetchingNewLocs}
+                                                 />
+                                             </div>
+                                             <div>
+                                                  <label className="block text-xs font-medium text-gray-600 dark:text-gray-300 mb-1">موجودی اولیه انبار</label>
+                                                  <input 
+                                                      type="number" 
+                                                      value={newSupplierStockQuantity} 
+                                                      onChange={e => setNewSupplierStockQuantity(e.target.value)} 
+                                                      className="w-full text-sm p-2 rounded border-gray-300 bg-white dark:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500" 
+                                                      min="0" 
+                                                      placeholder="مثلاً 100" 
+                                                  />
+                                             </div>
+                                         </div>
 
-                                     <div className="md:col-span-1">
-                                          <label className="block text-xs font-medium text-gray-600 dark:text-gray-300 mb-1">تعداد تخصیص</label>
-                                          <input type="number" name="quantity" value={newAssignment.quantity} onChange={handleAssignmentChange} className="w-full text-sm p-2 rounded border-gray-300 bg-white dark:bg-gray-700" placeholder="تعداد" />
+                                         <div className="md:col-span-1">
+                                              <label className="block text-xs font-medium text-gray-600 dark:text-gray-300 mb-1">تعداد تخصیص</label>
+                                              <input type="number" name="quantity" value={newAssignment.quantity} onChange={handleAssignmentChange} className="w-full text-sm p-2 rounded border-gray-300 bg-white dark:bg-gray-700" placeholder="تعداد" />
+                                         </div>
+                                         <div className="md:col-span-2">
+                                              <label className="block text-xs font-medium text-gray-600 dark:text-gray-300 mb-1">قیمت واحد (تومان)</label>
+                                              <input type="number" name="price" value={newAssignment.price} onChange={handleAssignmentChange} className="w-full text-sm p-2 rounded border-gray-300 bg-white dark:bg-gray-700" placeholder="قیمت" />
+                                         </div>
+                                         <div className="md:col-span-3">
+                                             <button type="button" onClick={handleAssignSupplier} disabled={isAssigning} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold py-2 px-4 rounded transition disabled:bg-indigo-400">
+                                                 {isAssigning ? 'در حال تخصیص...' : '+ افزودن تخصیص'}
+                                             </button>
+                                         </div>
                                      </div>
-                                     <div className="md:col-span-2">
-                                          <label className="block text-xs font-medium text-gray-600 dark:text-gray-300 mb-1">قیمت واحد (تومان)</label>
-                                          <input type="number" name="price" value={newAssignment.price} onChange={handleAssignmentChange} className="w-full text-sm p-2 rounded border-gray-300 bg-white dark:bg-gray-700" placeholder="قیمت" />
-                                     </div>
-                                     <div className="md:col-span-3">
-                                         <button type="button" onClick={handleAssignSupplier} disabled={isAssigning} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold py-2 px-4 rounded transition disabled:bg-indigo-400">
-                                             {isAssigning ? 'در حال تخصیص...' : '+ افزودن تخصیص'}
-                                         </button>
-                                     </div>
-                                 </div>
-                             )}
+                                 )}
+                            </div>
                         </div>
-                    </div>
+                    )}
 
                     <form onSubmit={handleSubmit} className="space-y-4">
                         <div className="flex items-center">
@@ -1647,7 +1736,7 @@
             );
         };
 
-        const ManageDemandItemsModal = ({ isOpen, onClose, onSave, demandToEdit, products, defaultStatusId, isProductsLoading }) => {
+        const ManageDemandItemsModal = ({ isOpen, onClose, onSave, demandToEdit, products, defaultStatusId, pendingRegStatusId, isProductsLoading }) => {
             const [items, setItems] = React.useState([]);
             const [originalItemIds, setOriginalItemIds] = React.useState(new Set());
             const [error, setError] = React.useState('');
@@ -1656,9 +1745,12 @@
 
             React.useEffect(() => {
                 if (demandToEdit) {
-                    const initialItems = demandToEdit.demand_item.map(item => ({ 
+                    const initialItems = (demandToEdit.demand_item || []).map(item => ({ 
                         ...item, 
-                        productid: item.product?.id, // Ensure productid is set for the select safely
+                        productid: item.product?.id || '',
+                        is_unregistered: !!item.unregistered_product_title,
+                        imageFile: null,
+                        imagePreview: item.unregistered_product_image_url || '',
                         key: crypto.randomUUID() 
                     }));
                     setItems(initialItems);
@@ -1669,14 +1761,24 @@
 
             if (!demandToEdit) return null;
 
-            const handleAddItem = () => {
-                setItems([...items, { productid: '', quantity: '', demand_admin_note: '', supply_admin_note: '', key: crypto.randomUUID() }]);
+            const handleAddItem = (isUnregistered = false) => {
+                setItems([...items, { productid: '', quantity: '', demand_admin_note: '', supply_admin_note: '', is_unregistered: isUnregistered, unregistered_product_title: '', unregistered_product_image_url: '', imageFile: null, imagePreview: '', key: crypto.randomUUID() }]);
             };
 
             const handleItemChange = (index, field, value) => {
                 const newItems = [...items];
                 newItems[index][field] = value;
                 setItems(newItems);
+            };
+            
+            const handleFileChange = (index, e) => {
+                const file = e.target.files[0];
+                if (file) {
+                    const newItems = [...items];
+                    newItems[index].imageFile = file;
+                    newItems[index].imagePreview = URL.createObjectURL(file);
+                    setItems(newItems);
+                }
             };
 
             const handleRemoveItem = (index) => {
@@ -1685,8 +1787,12 @@
 
             const handleSubmit = async (e) => {
                 e.preventDefault();
-                if (items.length === 0 || items.some(i => !i.productid || !i.quantity)) {
-                    setError('لطفا تمام کالاها را انتخاب کرده و تعداد آنها را مشخص کنید.');
+                if (items.length === 0) {
+                    setError('لطفا حداقل یک کالا یا یک درخواست کالای جدید اضافه کنید.');
+                    return;
+                }
+                if (items.some(i => (i.is_unregistered && (!i.unregistered_product_title || !i.unregistered_product_title.trim())) || (!i.is_unregistered && !i.productid) || !i.quantity)) {
+                    setError('لطفا اطلاعات تمام کالاها (نام/انتخاب محصول و تعداد) را کامل کنید.');
                     return;
                 }
                 
@@ -1694,33 +1800,57 @@
                 setError('');
 
                 try {
-                    const finalItemIds = new Set(items.filter(i => i.id).map(i => i.id));
+                    const processedItems = await Promise.all(items.map(async (item) => {
+                        let imageUrl = item.unregistered_product_image_url || null;
+                        
+                        if (item.is_unregistered && item.imageFile) {
+                            const fileExt = item.imageFile.name.split('.').pop();
+                            const fileName = `${crypto.randomUUID()}.${fileExt}`;
+                            
+                            const { data: uploadData, error: uploadError } = await supabaseClient.storage
+                                .from('unregistered_products')
+                                .upload(fileName, item.imageFile);
+                                
+                            if (!uploadError && uploadData) {
+                                const { data } = supabaseClient.storage.from('unregistered_products').getPublicUrl(fileName);
+                                imageUrl = data.publicUrl;
+                            }
+                        }
+                        
+                        return {
+                            ...item,
+                            unregistered_product_image_url: imageUrl
+                        };
+                    }));
+
+                    const finalItemIds = new Set(processedItems.filter(i => i.id).map(i => i.id));
                     const itemIdsToDelete = [...originalItemIds].filter(id => !finalItemIds.has(id));
                     
                     if (itemIdsToDelete.length > 0) {
-                        // Also delete from supplier_demand_assignment
                         await supabaseClient.from('supplier_demand_assignment').delete().in('demand_item_id', itemIdsToDelete);
                         await supabaseClient.from('demandstatuslog').delete().in('demand_item_id', itemIdsToDelete);
                         const { error: deleteError } = await supabaseClient.from('demand_item').delete().in('id', itemIdsToDelete);
                         if (deleteError) throw deleteError;
                     }
 
-                    const itemsToAdd = items.filter(item => !item.id);
-                    const itemsToUpdate = items.filter(item => item.id && originalItemIds.has(item.id));
+                    const itemsToAdd = processedItems.filter(item => !item.id);
+                    const itemsToUpdate = processedItems.filter(item => item.id && originalItemIds.has(item.id));
 
                     if (itemsToAdd.length > 0) {
                         const newItemsData = itemsToAdd.map(item => ({
                             demandid: demandToEdit.id,
-                            productid: item.productid,
+                            productid: item.is_unregistered ? null : item.productid,
+                            unregistered_product_title: item.is_unregistered ? item.unregistered_product_title : null,
+                            unregistered_product_image_url: item.is_unregistered ? item.unregistered_product_image_url : null,
                             quantity: Number(item.quantity),
                             demand_admin_note: item.demand_admin_note,
                             supply_admin_note: item.supply_admin_note,
-                            demandstatusid: defaultStatusId
+                            demandstatusid: item.is_unregistered ? pendingRegStatusId : defaultStatusId
                         }));
                         const { data: insertedItems, error: addError } = await supabaseClient.from('demand_item').insert(newItemsData).select();
                         if (addError) throw addError;
 
-                        const logsToInsert = insertedItems.map(item => ({ demand_item_id: item.id, demandstatusid: defaultStatusId }));
+                        const logsToInsert = insertedItems.map(item => ({ demand_item_id: item.id, demandstatusid: item.demandstatusid }));
                          if (logsToInsert.length > 0) {
                              const { error: logError } = await supabaseClient.from('demandstatuslog').insert(logsToInsert);
                              if (logError) console.error("Error logging status for new items:", logError);
@@ -1733,13 +1863,12 @@
                                 quantity: Number(item.quantity),
                                 demand_admin_note: item.demand_admin_note,
                                 supply_admin_note: item.supply_admin_note,
-                                productid: item.productid,
+                                productid: item.is_unregistered ? null : item.productid,
+                                unregistered_product_title: item.is_unregistered ? item.unregistered_product_title : null,
+                                unregistered_product_image_url: item.is_unregistered ? item.unregistered_product_image_url : null,
                             }).eq('id', item.id)
                         );
-                        const results = await Promise.all(updatePromises);
-                        results.forEach(({ error }) => {
-                            if (error) throw error;
-                        });
+                        await Promise.all(updatePromises);
                     }
 
                     if (demandToEdit.is_emergency !== isEmergency) {
@@ -1789,6 +1918,42 @@
                             </h3>
                             <div className="space-y-3">
                                 {items.map((item, index) => {
+                                    if (item.is_unregistered) {
+                                        return (
+                                            <div key={item.key} className="p-3 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg border border-yellow-200 dark:border-yellow-700/50">
+                                                <div className="grid grid-cols-1 md:grid-cols-5 items-start gap-x-4 gap-y-3">
+                                                    <div className="md:col-span-3 flex gap-3 items-start">
+                                                        <div className="relative">
+                                                            {item.imagePreview ? (
+                                                                <img src={item.imagePreview} alt="پیش‌نمایش" className="w-16 h-16 rounded-md object-cover border border-yellow-300 dark:border-yellow-600 shadow-sm" />
+                                                            ) : (
+                                                                <div className="w-16 h-16 rounded-md bg-yellow-100 dark:bg-yellow-800/50 border border-yellow-200 dark:border-yellow-700 flex items-center justify-center text-[10px] text-yellow-600 dark:text-yellow-400 shadow-sm text-center leading-tight">بدون<br/>عکس</div>
+                                                            )}
+                                                            <div className="mt-1">
+                                                                <label className="cursor-pointer text-[10px] text-blue-600 hover:text-blue-800 bg-blue-50 px-1 py-0.5 rounded border border-blue-200 w-full text-center block">
+                                                                    آپلود عکس
+                                                                    <input type="file" accept="image/*" onChange={(e) => handleFileChange(index, e)} className="hidden" />
+                                                                </label>
+                                                            </div>
+                                                        </div>
+                                                        <div className="flex-1 mt-1">
+                                                            <label className="text-xs text-yellow-700 dark:text-yellow-500 block mb-1">نام کالا (به صورت دقیق)</label>
+                                                            <input type="text" value={item.unregistered_product_title} onChange={(e) => handleItemChange(index, 'unregistered_product_title', e.target.value)} className="w-full bg-white dark:bg-gray-800 p-2 rounded-lg text-sm border border-transparent focus:ring-1 focus:ring-yellow-500" placeholder="مثلا: اسپیکر KTS 1626" required />
+                                                        </div>
+                                                    </div>
+                                                    <div className="md:col-span-1 mt-1">
+                                                        <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">تعداد</label>
+                                                        <input type="number" value={item.quantity} onChange={(e) => handleItemChange(index, 'quantity', e.target.value)} className="w-full bg-white dark:bg-gray-800 p-2 rounded-lg text-sm border border-transparent focus:ring-1 focus:ring-yellow-500" placeholder="تعداد" min="1" required />
+                                                    </div>
+                                                    <div className="flex justify-end mt-1"><button type="button" onClick={() => handleRemoveItem(index)} className="text-red-500 hover:text-red-700 p-2 mb-1">✕</button></div>
+                                                </div>
+                                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-3">
+                                                    <textarea value={item.demand_admin_note} onChange={(e) => handleItemChange(index, 'demand_admin_note', e.target.value)} placeholder="یادداشت مدیر تقاضا (لینک کالا، مشخصات فنی و...)" className="w-full text-sm bg-white dark:bg-gray-800 p-2 rounded-lg border border-transparent focus:outline-none focus:ring-1 focus:ring-yellow-500" rows="2"></textarea>
+                                                </div>
+                                            </div>
+                                        );
+                                    }
+
                                     const selectedProduct = products.find(p => p.id === item.productid);
                                     return (
                                     <div key={item.key} className="p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg border border-gray-100 dark:border-gray-700">
@@ -1826,7 +1991,11 @@
                                     </div>
                                 )})}
                             </div>
-                            <button type="button" onClick={handleAddItem} className="mt-4 w-full text-center py-2 px-4 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition font-semibold">+ افزودن کالا</button>
+
+                            <div className="flex flex-col sm:flex-row gap-3 mt-4">
+                                <button type="button" onClick={() => handleAddItem(false)} className="flex-1 text-center py-2 px-4 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition font-semibold text-gray-700 dark:text-gray-300">+ افزودن کالای موجود</button>
+                                <button type="button" onClick={() => handleAddItem(true)} className="flex-1 text-center py-2 px-4 border-2 border-dashed border-yellow-300 dark:border-yellow-600/50 rounded-lg hover:bg-yellow-50 dark:hover:bg-yellow-900/30 transition font-semibold text-yellow-600 dark:text-yellow-500">+ درخواست ثبت کالای جدید</button>
+                            </div>
                         </div>
                         
                         {error && <p className="text-red-500 text-sm">{error}</p>}
@@ -1919,6 +2088,7 @@
             const [products, setProducts] = React.useState([]);
             const [demandStatuses, setDemandStatuses] = React.useState([]);
             const [defaultStatusId, setDefaultStatusId] = React.useState(null);
+            const [pendingRegStatusId, setPendingRegStatusId] = React.useState(null);
             const [confirmState, setConfirmState] = React.useState({ isOpen: false, onConfirm: null, message: '', title: '' });
 
             // Currency State
@@ -2001,7 +2171,7 @@
                         profiles(id, fullname, firstname, mobile), 
                         location(id, address, city(title, province(title))), 
                         ${itemJoin}(
-                            id, quantity, approved_supply_price, approved_supply_quantity, demand_admin_note, supply_admin_note, demandstatusid, productid, 
+                            id, quantity, approved_supply_price, approved_supply_quantity, demand_admin_note, supply_admin_note, demandstatusid, productid, unregistered_product_title, unregistered_product_image_url, 
                             product(id, title, image_url, brand(title), productproperty(value, propertykey(title))), 
                             ${statusJoin}(id, main_status, title_farsi)
                         )
@@ -2089,6 +2259,9 @@
                     } else {
                         setDefaultStatusId(statusesRes.data?.[0]?.id || null);
                     }
+                    
+                    const pendingStatus = statusesRes.data?.find(s => s.title_farsi === 'در انتظار ثبت کالا');
+                    setPendingRegStatusId(pendingStatus?.id || defaultStatus?.id || null);
                 } catch (err) {
                     console.error("Error fetching basic reference data:", err);
                 } finally {
@@ -2138,7 +2311,7 @@
                     const { data: cancelledItemsData, error: cancelledError } = await supabaseClient
                         .from('demand_item')
                         .select(`
-                            id, quantity, productid, demand_admin_note, createdat,
+                            id, quantity, productid, demand_admin_note, createdat, unregistered_product_title, unregistered_product_image_url,
                             demandstatustype!inner(main_status),
                             product(id, title, image_url, brand(title)),
                             demand!inner(id, createdat, profiles(id, fullname, firstname, mobile), location(id, address, city(title, province(title))))
@@ -2151,7 +2324,7 @@
 
                     const cancelled = [];
                     (cancelledItemsData || []).forEach(item => {
-                        if (item.product || item.productid) {
+                        if (item.product || item.productid || item.unregistered_product_title) {
                             // عدم نمایش مواردی که قبلا بازاریابی مجدد شده‌اند
                             if (item.demand_admin_note && item.demand_admin_note.includes('[Retargeted]')) return;
 
@@ -2171,7 +2344,7 @@
                         return;
                     }
 
-                    // 2. Fetch current stock for these products
+                    // 2. Fetch current stock for these products (ONLY registered products have stock)
                     const productIds = [...new Set(cancelled.map(i => i.productid))].filter(id => id !== undefined && id !== null);
                     
                     if (productIds.length === 0) {
@@ -2231,7 +2404,7 @@
                     // 3. Aggregate products and quantities
                     const productAgg = {};
                     customerDemands.forEach(d => {
-                        d.demand_item.forEach(item => {
+                        (d.demand_item || []).forEach(item => {
                             if (!item.product) return;
                             // Ignore cancelled items from history calculation
                             if (item.demandstatustype?.main_status === 'Cancelled') return;
@@ -2386,16 +2559,16 @@
                         const searchTermLower = searchTerm.toLowerCase();
                         const customerMatch = formatProfileName(demand.profiles).toLowerCase().includes(searchTermLower) || demand.profiles?.mobile?.includes(searchTermLower);
 
-                        const productMatch = demand.demand_item.some(item => {
-                            if (!item.product) return false;
-                            const titleMatch = item.product.title?.toLowerCase().includes(searchTermLower);
-                            const brandMatch = item.product.brand?.title?.toLowerCase().includes(searchTermLower);
-                            const telegramCodeProp = item.product.productproperty?.find(
+                        const productMatch = (demand.demand_item || []).some(item => {
+                            const titleMatch = item.product?.title?.toLowerCase().includes(searchTermLower);
+                            const brandMatch = item.product?.brand?.title?.toLowerCase().includes(searchTermLower);
+                            const unregMatch = item.unregistered_product_title?.toLowerCase().includes(searchTermLower);
+                            const telegramCodeProp = item.product?.productproperty?.find(
                                 prop => prop.propertykey?.title?.toLowerCase().includes('تلگرام')
                             );
                             const telegramCode = telegramCodeProp ? telegramCodeProp.value : '';
                             const codeMatch = telegramCode?.toLowerCase().includes(searchTermLower);
-                            return titleMatch || brandMatch || codeMatch;
+                            return titleMatch || brandMatch || codeMatch || unregMatch;
                         });
 
                         const idMatch = String(demand.id).includes(searchTermLower);
@@ -2404,46 +2577,9 @@
                     .filter(demand => !emergencyFilter || demand.is_emergency === true)
                     .filter(demand => 
                         !awaitingCustomerFilter || 
-                        demand.demand_item.some(item => item.demandstatustype?.title_farsi === "کالا تامین شد و منتظر تصمیم مشتری هست")
+                        (demand.demand_item || []).some(item => item.demandstatustype?.title_farsi === "کالا تامین شد و منتظر تصمیم مشتری هست")
                     );
             }, [demands, searchTerm, emergencyFilter, awaitingCustomerFilter]);
-
-            // Filter logic for Retargeting
-            const filteredRetargetingItems = React.useMemo(() => {
-                return retargetingItems.filter(item => {
-                    // Search Logic
-                    const searchLower = retargetingSearchTerm.toLowerCase();
-                    const matchesSearch = !retargetingSearchTerm || 
-                        item.product?.title?.toLowerCase().includes(searchLower) ||
-                        item.product?.brand?.title?.toLowerCase().includes(searchLower) ||
-                        formatProfileName(item.customer).toLowerCase().includes(searchLower) ||
-                        item.customer?.mobile?.includes(searchLower);
-
-                    // Time Filter Logic (Stock)
-                    if (!matchesSearch) return false;
-                    
-                    if (retargetingTimeFilter === '7days') {
-                        const sevenDaysAgo = new Date();
-                        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-                        // Check if ANY supplier has updated in the last 7 days
-                        const hasRecentStock = item.availableSuppliers.some(s => new Date(s.lastupdatedat) >= sevenDaysAgo);
-                        if (!hasRecentStock) return false;
-                    }
-
-                    // --- NEW: Time Filter Logic (Cancellation/Demand Date) ---
-                    if (retargetingCancellationFilter !== 'all') {
-                        const days = parseInt(retargetingCancellationFilter);
-                        if (!isNaN(days)) {
-                            const cutoffDate = new Date();
-                            cutoffDate.setDate(cutoffDate.getDate() - days);
-                            // We use item.demandDate (which is technically creation date here) as proxy
-                            if (new Date(item.demandDate) < cutoffDate) return false;
-                        }
-                    }
-                    
-                    return true;
-                });
-            }, [retargetingItems, retargetingSearchTerm, retargetingTimeFilter, retargetingCancellationFilter]);
 
             const handleDeleteDemand = (demandId) => {
                 setConfirmState({
@@ -2453,15 +2589,17 @@
                     onConfirm: async () => {
                         try {
                             setConfirmState({ isOpen: false });
-                            const itemIds = demands.find(d => d.id === demandId)?.demand_item.map(i => i.id) || [];
+                            const targetDemand = demands.find(d => d.id === demandId);
+                            const itemIds = targetDemand?.demand_item?.map(i => i.id) || [];
+                            
                             if(itemIds.length > 0) {
-                                // Also delete from supplier_demand_assignment
                                 await supabaseClient.from('supplier_demand_assignment').delete().in('demand_item_id', itemIds);
                                 await supabaseClient.from('demandstatuslog').delete().in('demand_item_id', itemIds);
-                                // Optional: Delete demand_item_log entries as well if used
                             }
+                            
                             await supabaseClient.from('demand_item').delete().eq('demandid', demandId);
                             await supabaseClient.from('demand').delete().eq('id', demandId);
+                            
                             fetchDemands(statusFilter, true); 
                             addToast('تقاضا با موفقیت حذف شد.');
                         } catch (err) {
@@ -2477,7 +2615,7 @@
                 setConfirmState({
                     isOpen: true,
                     title: 'صدور مجدد تقاضا',
-                    message: `آیا از صدور تقاضای جدید برای مشتری ${item.customer?.fullname} جهت محصول ${item.product?.title} اطمینان دارید؟`,
+                    message: `آیا از صدور تقاضای جدید برای مشتری ${item.customer?.fullname} جهت محصول ${item.product?.title || item.unregistered_product_title} اطمینان دارید؟`,
                     onConfirm: async () => {
                         setIsRetargetingLoading(true);
                         setConfirmState({ isOpen: false, onConfirm: null, message: '', title: '' }); // Close modal immediately
@@ -2501,6 +2639,8 @@
                                 .insert({
                                     demandid: newDemand.id,
                                     productid: item.productid,
+                                    unregistered_product_title: item.unregistered_product_title,
+                                    unregistered_product_image_url: item.unregistered_product_image_url,
                                     quantity: item.quantity, // Use original quantity
                                     demand_admin_note: `Retargeted from cancelled item ID: ${item.id}`, // Add note linking back
                                     demandstatusid: defaultStatusId // Use the default open status
@@ -2728,8 +2868,9 @@
                                                 </span>
                                                 <button 
                                                     onClick={() => handleOpenManageItemsModal(demand)} 
-                                                    className="p-1 rounded-full transition-colors text-gray-400 hover:text-indigo-500 dark:hover:text-indigo-400" 
-                                                    title="مدیریت اقلام"
+                                                    disabled={isProductsLoading}
+                                                    className={`p-1 rounded-full transition-colors ${isProductsLoading ? 'text-gray-300 opacity-50 cursor-not-allowed' : 'text-gray-400 hover:text-indigo-500 dark:hover:text-indigo-400'}`} 
+                                                    title={isProductsLoading ? "در حال بارگذاری محصولات..." : "مدیریت اقلام"}
                                                 >
                                                     <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
                                                         <path d="M17.414 2.586a2 2 0 00-2.828 0L7 10.172V13h2.828l7.586-7.586a2 2 0 000-2.828z" />
@@ -2743,113 +2884,221 @@
                                         </header>
                                         
                                         {/* Demand Items (Desktop Table View - md:block and up) */}
-                                        <div className="overflow-x-auto hidden md:block">
-                                            <table className="min-w-full text-sm text-right divide-y divide-gray-200 dark:divide-gray-700">
-                                                <thead className="bg-gray-50 dark:bg-gray-700/50 text-xs text-gray-600 dark:text-gray-300 uppercase">
-                                                    <tr>
-                                                        <th className="p-3 text-right">محصول</th>
-                                                        <th className="p-3 text-right">تعداد درخواستی</th>
-                                                        <th className="p-3 text-right">قیمت تامین</th>
-                                                        <th className="p-3 text-right">تعداد تامین</th>
-                                                        <th className="p-3 text-right">وضعیت آیتم</th>
-                                                        <th className="p-3 text-right">عملیات</th>
-                                                    </tr>
-                                                </thead>
-                                                <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-                                                {demand.demand_item.map((item, itemIndex) => (
-                                                    <React.Fragment key={item.id}>
-                                                        <tr className="hover:bg-gray-50 dark:hover:bg-gray-700/20">
-                                                            <td className="p-3 font-semibold text-gray-800 dark:text-gray-100">
-                                                                <div className="flex items-center gap-3">
-                                                                    {/* نمایش عکس کالا با لود تنبل و افکت بزرگنمایی */}
-                                                                    {item.product?.image_url ? (
-                                                                        <img src={item.product.image_url} loading="lazy" className="w-16 h-16 md:w-20 md:h-20 rounded-md object-cover border border-gray-200 dark:border-gray-600 shadow-sm hover:scale-[1.5] transition-transform duration-300 relative z-10 hover:z-50" />
-                                                                    ) : (
-                                                                        <div className="w-16 h-16 md:w-20 md:h-20 rounded-md bg-gray-100 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 flex items-center justify-center text-xs text-gray-400">بدون عکس</div>
+                                        {(demand.demand_item?.length > 0) && (
+                                            <div className="overflow-x-auto hidden md:block">
+                                                <table className="min-w-full text-sm text-right divide-y divide-gray-200 dark:divide-gray-700">
+                                                    <thead className="bg-gray-50 dark:bg-gray-700/50 text-xs text-gray-600 dark:text-gray-300 uppercase">
+                                                        <tr>
+                                                            <th className="p-3 text-right">محصول</th>
+                                                            <th className="p-3 text-right">تعداد درخواستی</th>
+                                                            <th className="p-3 text-right">قیمت تامین</th>
+                                                            <th className="p-3 text-right">تعداد تامین</th>
+                                                            <th className="p-3 text-right">وضعیت آیتم</th>
+                                                            <th className="p-3 text-right">عملیات</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+                                                    
+                                                    {(demand.demand_item || []).map((item, itemIndex) => {
+                                                        if (item.unregistered_product_title) {
+                                                            return (
+                                                                <React.Fragment key={`unreg-${item.id}`}>
+                                                                    <tr className="bg-yellow-50/60 dark:bg-yellow-900/10 border-r-4 border-yellow-400 dark:border-yellow-600">
+                                                                        <td className="p-3 font-semibold text-yellow-800 dark:text-yellow-200">
+                                                                            <div className="flex items-center gap-3">
+                                                                                {item.unregistered_product_image_url ? (
+                                                                                    <img src={item.unregistered_product_image_url} loading="lazy" className="w-16 h-16 md:w-20 md:h-20 rounded-md object-cover border border-yellow-300 dark:border-yellow-600 shadow-sm hover:scale-[1.5] transition-transform duration-300 relative z-10 hover:z-50" />
+                                                                                ) : (
+                                                                                    <div className="w-16 h-16 md:w-20 md:h-20 rounded-md bg-yellow-100 dark:bg-yellow-800/50 border border-yellow-200 dark:border-yellow-700 flex items-center justify-center text-[10px] text-yellow-600 dark:text-yellow-400 text-center leading-tight">بدون<br/>عکس</div>
+                                                                                )}
+                                                                                <div className="flex flex-col">
+                                                                                    <span>{item.unregistered_product_title}</span>
+                                                                                    <span className="text-[10px] text-yellow-600 dark:text-yellow-500 mt-1">کالای ثبت‌نشده در سیستم</span>
+                                                                                </div>
+                                                                            </div>
+                                                                        </td>
+                                                                        <td className="p-3 font-mono font-bold text-gray-700 dark:text-gray-300">{item.quantity}</td>
+                                                                        <td className="p-3 text-gray-400 font-mono">-</td>
+                                                                        <td className="p-3 text-gray-400">-</td>
+                                                                        <td className="p-3">
+                                                                            <span className="px-2 py-1 text-xs rounded-full whitespace-nowrap" style={{ backgroundColor: item.demandstatustype?.color_bg || '#E5E7EB', color: item.demandstatustype?.color_text || '#1F2937' }}>
+                                                                                {item.demandstatustype?.title_farsi || 'ثبت شده'}
+                                                                            </span>
+                                                                        </td>
+                                                                        <td className="p-3">
+                                                                            <button 
+                                                                                onClick={() => handleOpenEditItemModal(item, demand)} 
+                                                                                disabled={isProductsLoading}
+                                                                                className={`text-xs font-semibold transition-colors ${isProductsLoading ? 'text-gray-400 opacity-50 cursor-not-allowed' : 'text-yellow-600 dark:text-yellow-400 hover:text-yellow-700 hover:underline'}`}
+                                                                            >
+                                                                                بررسی / ویرایش
+                                                                            </button>
+                                                                        </td>
+                                                                    </tr>
+                                                                    {(item.demand_admin_note || item.supply_admin_note) && (
+                                                                        <tr className="bg-yellow-50/40 dark:bg-yellow-900/5 border-r-4 border-yellow-400 dark:border-yellow-600">
+                                                                            <td colSpan="6" className="px-4 py-2 text-xs text-yellow-700 dark:text-yellow-400">
+                                                                                {item.demand_admin_note && <div><strong>یادداشت مدیر تقاضا:</strong> {item.demand_admin_note}</div>}
+                                                                                {item.supply_admin_note && <div className="mt-1"><strong>یادداشت مدیر تامین:</strong> {item.supply_admin_note}</div>}
+                                                                            </td>
+                                                                        </tr>
                                                                     )}
+                                                                </React.Fragment>
+                                                            );
+                                                        }
+                                                        
+                                                        return (
+                                                            <React.Fragment key={item.id}>
+                                                                <tr className="hover:bg-gray-50 dark:hover:bg-gray-700/20">
+                                                                    <td className="p-3 font-semibold text-gray-800 dark:text-gray-100">
+                                                                        <div className="flex items-center gap-3">
+                                                                            {/* نمایش عکس کالا با لود تنبل و افکت بزرگنمایی */}
+                                                                            {item.product?.image_url ? (
+                                                                                <img src={item.product.image_url} loading="lazy" className="w-16 h-16 md:w-20 md:h-20 rounded-md object-cover border border-gray-200 dark:border-gray-600 shadow-sm hover:scale-[1.5] transition-transform duration-300 relative z-10 hover:z-50" />
+                                                                            ) : (
+                                                                                <div className="w-16 h-16 md:w-20 md:h-20 rounded-md bg-gray-100 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 flex items-center justify-center text-xs text-gray-400">بدون عکس</div>
+                                                                            )}
+                                                                            <span>{item.product ? `${item.product.brand ? item.product.brand.title + ' ' : ''}${item.product.title}`: 'محصول حذف شده'}</span>
+                                                                        </div>
+                                                                    </td>
+                                                                    <td className="p-3">{item.quantity}</td>
+                                                                    <td className="p-3 font-mono">{formatCurrency(item.approved_supply_price)}</td>
+                                                                    <td className="p-3">{item.approved_supply_quantity || '-'}</td>
+                                                                    <td className="p-3">
+                                                                        <span className="px-2 py-1 text-xs rounded-full whitespace-nowrap" style={{ backgroundColor: item.demandstatustype?.color_bg || '#E5E7EB', color: item.demandstatustype?.color_text || '#1F2937' }}>
+                                                                            {item.demandstatustype?.title_farsi || 'ثبت شده'}
+                                                                        </span>
+                                                                    </td>
+                                                                    <td className="p-3">
+                                                                        <button 
+                                                                            onClick={() => handleOpenEditItemModal(item, demand)} 
+                                                                            disabled={isProductsLoading}
+                                                                            className={`text-xs font-semibold transition-colors ${isProductsLoading ? 'text-gray-400 opacity-50 cursor-not-allowed' : 'text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 hover:underline'}`}
+                                                                        >
+                                                                            ویرایش
+                                                                        </button>
+                                                                    </td>
+                                                                </tr>
+                                                                {(item.demand_admin_note || item.supply_admin_note) && (
+                                                                    <tr className="bg-gray-50 dark:bg-gray-900/20">
+                                                                        <td colSpan="6" className="px-4 py-2 text-xs text-gray-600 dark:text-gray-400">
+                                                                            {item.demand_admin_note && <div><strong>یادداشت مدیر تقاضا:</strong> {item.demand_admin_note}</div>}
+                                                                            {item.supply_admin_note && <div className="mt-1"><strong>یادداشت مدیر تامین:</strong> {item.supply_admin_note}</div>}
+                                                                        </td>
+                                                                    </tr>
+                                                                )}
+                                                            </React.Fragment>
+                                                        );
+                                                    })}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        )}
+                                        
+                                        {/* Demand Items (Mobile Card View - default/md:hidden) */}
+                                        {(demand.demand_item?.length > 0) && (
+                                            <div className="md:hidden p-3 space-y-3">
+                                                
+                                                {(demand.demand_item || []).map((item, itemIndex) => {
+                                                    if (item.unregistered_product_title) {
+                                                        return (
+                                                            <div key={`m-unreg-${item.id}`} className="p-3 border-2 border-dashed border-yellow-300 dark:border-yellow-600 rounded-lg bg-yellow-50 dark:bg-yellow-900/20 space-y-2 relative overflow-hidden">
+                                                                <div className="absolute top-0 right-0 w-1 h-full bg-yellow-400 dark:bg-yellow-600"></div>
+                                                                <div className="flex justify-between items-start border-b pb-2 mb-2 border-yellow-200 dark:border-yellow-700/50">
+                                                                    <div className="font-bold text-sm text-yellow-700 dark:text-yellow-400 flex items-center gap-3">
+                                                                        {item.unregistered_product_image_url ? (
+                                                                            <img src={item.unregistered_product_image_url} loading="lazy" className="w-14 h-14 rounded-md object-cover border border-yellow-300 dark:border-yellow-600 shadow-sm" />
+                                                                        ) : (
+                                                                            <div className="w-14 h-14 rounded-md bg-yellow-100 dark:bg-yellow-800/50 flex items-center justify-center text-[10px] text-yellow-600 dark:text-yellow-400 border border-yellow-200 dark:border-yellow-700 text-center leading-tight">بدون<br/>عکس</div>
+                                                                        )}
+                                                                        <div className="flex flex-col">
+                                                                            <span>{item.unregistered_product_title}</span>
+                                                                            <span className="text-[10px] text-yellow-600 dark:text-yellow-500 mt-1">کالای ثبت‌نشده در سیستم</span>
+                                                                        </div>
+                                                                    </div>
+                                                                    <button 
+                                                                        onClick={() => handleOpenEditItemModal(item, demand)} 
+                                                                        disabled={isProductsLoading}
+                                                                        className={`text-xs font-semibold px-2 py-1 rounded-md transition-colors ${isProductsLoading ? 'text-gray-400 bg-gray-200 dark:bg-gray-700 opacity-50 cursor-not-allowed' : 'text-yellow-700 dark:text-yellow-300 hover:underline bg-yellow-200 dark:bg-yellow-800/50'}`}
+                                                                    >
+                                                                        بررسی
+                                                                    </button>
+                                                                </div>
+                                                                
+                                                                <div className="grid grid-cols-2 gap-3 text-xs pl-2">
+                                                                    <div className="flex justify-between">
+                                                                        <span className="text-gray-500 dark:text-gray-400">تعداد درخواستی:</span>
+                                                                        <span className="font-semibold text-gray-800 dark:text-gray-200">{item.quantity}</span>
+                                                                    </div>
+                                                                </div>
+
+                                                                <div className="pt-2 border-t border-yellow-200 dark:border-yellow-700/50 mt-2 pl-2">
+                                                                    <div className="text-right mb-2">
+                                                                        <span className="px-2 py-1 text-xs rounded-full whitespace-nowrap font-medium" style={{ backgroundColor: item.demandstatustype?.color_bg || '#E5E7EB', color: item.demandstatustype?.color_text || '#1F2937' }}>
+                                                                            {item.demandstatustype?.title_farsi || 'ثبت شده'}
+                                                                        </span>
+                                                                    </div>
+                                                                    {(item.demand_admin_note || item.supply_admin_note) && (
+                                                                        <div className="mt-2 text-xs text-yellow-700 dark:text-yellow-400 space-y-1">
+                                                                            {item.demand_admin_note && <div><strong>مدیر تقاضا:</strong> {item.demand_admin_note}</div>}
+                                                                            {item.supply_admin_note && <div><strong>مدیر تامین:</strong> {item.supply_admin_note}</div>}
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                            </div>
+                                                        );
+                                                    }
+
+                                                    return (
+                                                        <div key={item.id} className="p-3 border border-gray-200 dark:border-gray-700 rounded-lg bg-gray-50 dark:bg-gray-700/50 space-y-2">
+                                                            <div className="flex justify-between items-start border-b pb-2 mb-2 border-gray-200 dark:border-gray-600">
+                                                                <div className="font-bold text-sm text-indigo-700 dark:text-indigo-400 flex items-center gap-3">
+                                                                    {/* نمایش عکس کالا در حالت موبایل */}
+                                                                    {item.product?.image_url && <img src={item.product.image_url} loading="lazy" className="w-14 h-14 rounded-md object-cover border border-gray-200 dark:border-gray-600 shadow-sm" />}
                                                                     <span>{item.product ? `${item.product.brand ? item.product.brand.title + ' ' : ''}${item.product.title}`: 'محصول حذف شده'}</span>
                                                                 </div>
-                                                            </td>
-                                                            <td className="p-3">{item.quantity}</td>
-                                                            <td className="p-3 font-mono">{formatCurrency(item.approved_supply_price)}</td>
-                                                            <td className="p-3">{item.approved_supply_quantity || '-'}</td>
-                                                            <td className="p-3">
-                                                                <span className="px-2 py-1 text-xs rounded-full whitespace-nowrap" style={{ backgroundColor: item.demandstatustype?.color_bg || '#E5E7EB', color: item.demandstatustype?.color_text || '#1F2937' }}>
-                                                                    {item.demandstatustype?.title_farsi || 'ثبت شده'}
-                                                                </span>
-                                                            </td>
-                                                            <td className="p-3">
                                                                 <button 
                                                                     onClick={() => handleOpenEditItemModal(item, demand)} 
-                                                                    className="text-xs font-semibold transition-colors text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 hover:underline"
+                                                                    disabled={isProductsLoading}
+                                                                    className={`text-xs font-semibold px-2 py-1 rounded-md transition-colors ${isProductsLoading ? 'text-gray-400 bg-gray-200 dark:bg-gray-700 opacity-50 cursor-not-allowed' : 'text-indigo-600 dark:text-indigo-400 hover:underline bg-indigo-100 dark:bg-indigo-900/50'}`}
                                                                 >
                                                                     ویرایش
                                                                 </button>
-                                                            </td>
-                                                        </tr>
-                                                        {(item.demand_admin_note || item.supply_admin_note) && (
-                                                            <tr className="bg-gray-50 dark:bg-gray-900/20">
-                                                                <td colSpan="6" className="px-4 py-2 text-xs text-gray-600 dark:text-gray-400">
-                                                                    {item.demand_admin_note && <div><strong>یادداشت مدیر تقاضا:</strong> {item.demand_admin_note}</div>}
-                                                                    {item.supply_admin_note && <div className="mt-1"><strong>یادداشت مدیر تامین:</strong> {item.supply_admin_note}</div>}
-                                                                </td>
-                                                            </tr>
-                                                        )}
-                                                    </React.Fragment>
-                                                ))}
-                                                </tbody>
-                                            </table>
-                                        </div>
-                                        
-                                        {/* Demand Items (Mobile Card View - default/md:hidden) */}
-                                        <div className="md:hidden p-3 space-y-3">
-                                            {demand.demand_item.map((item, itemIndex) => (
-                                                <div key={item.id} className="p-3 border border-gray-200 dark:border-gray-700 rounded-lg bg-gray-50 dark:bg-gray-700/50 space-y-2">
-                                                    <div className="flex justify-between items-start border-b pb-2 mb-2 border-gray-200 dark:border-gray-600">
-                                                        <div className="font-bold text-sm text-indigo-700 dark:text-indigo-400 flex items-center gap-3">
-                                                            {/* نمایش عکس کالا در حالت موبایل */}
-                                                            {item.product?.image_url && <img src={item.product.image_url} loading="lazy" className="w-14 h-14 rounded-md object-cover border border-gray-200 dark:border-gray-600 shadow-sm" />}
-                                                            <span>{item.product ? `${item.product.brand ? item.product.brand.title + ' ' : ''}${item.product.title}`: 'محصول حذف شده'}</span>
-                                                        </div>
-                                                        <button 
-                                                            onClick={() => handleOpenEditItemModal(item, demand)} 
-                                                            className="text-xs font-semibold px-2 py-1 rounded-md transition-colors text-indigo-600 dark:text-indigo-400 hover:underline bg-indigo-100 dark:bg-indigo-900/50"
-                                                        >
-                                                            ویرایش
-                                                        </button>
-                                                    </div>
-                                                    
-                                                    <div className="grid grid-cols-2 gap-3 text-xs">
-                                                        <div className="flex justify-between">
-                                                            <span className="text-gray-500 dark:text-gray-400">تعداد درخواستی:</span>
-                                                            <span className="font-semibold text-gray-800 dark:text-gray-200">{item.quantity}</span>
-                                                        </div>
-                                                        <div className="flex justify-between">
-                                                            <span className="text-gray-500 dark:text-gray-400">تعداد تامین:</span>
-                                                            <span className="font-semibold text-gray-800 dark:text-gray-200">{item.approved_supply_quantity || '-'}</span>
-                                                        </div>
-                                                        <div className="flex justify-between col-span-2">
-                                                            <span className="text-gray-500 dark:text-gray-400">قیمت تامین:</span>
-                                                            <span className="font-mono text-green-600 dark:text-green-400">{formatCurrency(item.approved_supply_price)}</span>
-                                                        </div>
-                                                    </div>
-
-                                                    <div className="pt-2 border-t border-gray-200 dark:border-gray-600 mt-2">
-                                                        <div className="text-right mb-2">
-                                                            <span className="px-2 py-1 text-xs rounded-full whitespace-nowrap font-medium" style={{ backgroundColor: item.demandstatustype?.color_bg || '#E5E7EB', color: item.demandstatustype?.color_text || '#1F2937' }}>
-                                                                {item.demandstatustype?.title_farsi || 'ثبت شده'}
-                                                            </span>
-                                                        </div>
-                                                        {(item.demand_admin_note || item.supply_admin_note) && (
-                                                            <div className="mt-2 text-xs text-gray-600 dark:text-gray-400 space-y-1">
-                                                                {item.demand_admin_note && <div><strong>مدیر تقاضا:</strong> {item.demand_admin_note}</div>}
-                                                                {item.supply_admin_note && <div><strong>مدیر تامین:</strong> {item.supply_admin_note}</div>}
                                                             </div>
-                                                        )}
-                                                    </div>
-                                                </div>
-                                            ))}
-                                        </div>
+                                                            
+                                                            <div className="grid grid-cols-2 gap-3 text-xs">
+                                                                <div className="flex justify-between">
+                                                                    <span className="text-gray-500 dark:text-gray-400">تعداد درخواستی:</span>
+                                                                    <span className="font-semibold text-gray-800 dark:text-gray-200">{item.quantity}</span>
+                                                                </div>
+                                                                <div className="flex justify-between">
+                                                                    <span className="text-gray-500 dark:text-gray-400">تعداد تامین:</span>
+                                                                    <span className="font-semibold text-gray-800 dark:text-gray-200">{item.approved_supply_quantity || '-'}</span>
+                                                                </div>
+                                                                <div className="flex justify-between col-span-2">
+                                                                    <span className="text-gray-500 dark:text-gray-400">قیمت تامین:</span>
+                                                                    <span className="font-mono text-green-600 dark:text-green-400">{formatCurrency(item.approved_supply_price)}</span>
+                                                                </div>
+                                                            </div>
+
+                                                            <div className="pt-2 border-t border-gray-200 dark:border-gray-600 mt-2">
+                                                                <div className="text-right mb-2">
+                                                                    <span className="px-2 py-1 text-xs rounded-full whitespace-nowrap font-medium" style={{ backgroundColor: item.demandstatustype?.color_bg || '#E5E7EB', color: item.demandstatustype?.color_text || '#1F2937' }}>
+                                                                        {item.demandstatustype?.title_farsi || 'ثبت شده'}
+                                                                    </span>
+                                                                </div>
+                                                                {(item.demand_admin_note || item.supply_admin_note) && (
+                                                                    <div className="mt-2 text-xs text-gray-600 dark:text-gray-400 space-y-1">
+                                                                        {item.demand_admin_note && <div><strong>مدیر تقاضا:</strong> {item.demand_admin_note}</div>}
+                                                                        {item.supply_admin_note && <div><strong>مدیر تامین:</strong> {item.supply_admin_note}</div>}
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        )}
                                     </div>
                                 ))}
                                 </div>
@@ -2916,8 +3165,12 @@
                                             <div className="p-4 border-b border-gray-200 dark:border-gray-700 flex flex-col md:flex-row justify-between gap-4 bg-gray-50 dark:bg-gray-900/50">
                                                 <div>
                                                     <h3 className="text-lg font-bold text-indigo-700 dark:text-indigo-400 mb-1 flex items-center gap-3">
-                                                        {item.product?.image_url && <img src={item.product.image_url} loading="lazy" className="w-16 h-16 rounded-md object-cover border border-gray-200 dark:border-gray-600 shadow-sm" />}
-                                                        <span>{item.product?.brand?.title} {item.product?.title}</span>
+                                                        {item.product?.image_url ? (
+                                                            <img src={item.product.image_url} loading="lazy" className="w-16 h-16 rounded-md object-cover border border-gray-200 dark:border-gray-600 shadow-sm" />
+                                                        ) : item.unregistered_product_image_url ? (
+                                                            <img src={item.unregistered_product_image_url} loading="lazy" className="w-16 h-16 rounded-md object-cover border border-yellow-300 dark:border-yellow-600 shadow-sm" />
+                                                        ) : null}
+                                                        <span>{item.product ? `${item.product.brand?.title} ${item.product.title}` : item.unregistered_product_title}</span>
                                                     </h3>
                                                     <div className="text-sm text-gray-500 dark:text-gray-400 flex flex-wrap gap-x-4 gap-y-1">
                                                         <span>مشتری: <span className="font-semibold text-gray-800 dark:text-gray-200">{formatProfileName(item.customer)}</span> ({item.customer?.mobile})</span>
@@ -2987,165 +3240,9 @@
                         </div>
                     )}
 
-                    {/* Content for Pre-Demand (Offer) */}
-                    {activeTab === 'predemand' && (
-                        <div className="space-y-6 animate-toast-in">
-                            <div className="bg-gradient-to-r from-indigo-50 to-purple-50 dark:from-indigo-900/20 dark:to-purple-900/20 p-4 rounded-lg border border-indigo-100 dark:border-indigo-800 text-sm">
-                                <p className="font-semibold text-indigo-800 dark:text-indigo-300 flex items-center gap-2">
-                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
-                                    تولید هوشمند پیشنهاد خرید
-                                </p>
-                                <p className="mt-2 text-indigo-700 dark:text-indigo-400/80 leading-relaxed">
-                                    در این بخش می‌توانید با بررسی سوابق خرید یک مشتری در بازه‌های زمانی مختلف، لیستی از کالاهای پرمصرف او را استخراج کنید. سیستم بر اساس میانگین مصرف، تعداد مورد نیاز را پیش‌بینی می‌کند و آخرین قیمت‌های ثبت‌شده در بازار را برای تصمیم‌گیری بهتر مدیر تقاضا نمایش می‌دهد. این لیست قابلیت ویرایش و تبدیل مستقیم به تقاضای رسمی را دارد.
-                                </p>
-                            </div>
-
-                            {/* Filters / Config for Pre-Demand */}
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end bg-white dark:bg-gray-800 p-5 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700">
-                                <div className="md:col-span-1">
-                                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5 block">انتخاب مشتری</label>
-                                    <SearchableSelect 
-                                        options={customerOptions} 
-                                        value={preDemandCustomerId} 
-                                        onChange={setPreDemandCustomerId} 
-                                        placeholder="جستجوی نام مشتری..." 
-                                    />
-                                </div>
-                                <div className="md:col-span-1">
-                                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5 block">محاسبه بر اساس سوابق</label>
-                                    <select 
-                                        value={preDemandTimeframe} 
-                                        onChange={e => setPreDemandTimeframe(e.target.value)} 
-                                        className="w-full p-2 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 focus:ring-2 focus:ring-indigo-500 rounded-lg text-gray-700 dark:text-gray-200"
-                                    >
-                                        <option value="30">یک ماه گذشته</option>
-                                        <option value="90">سه ماه گذشته</option>
-                                        <option value="180">شش ماه گذشته</option>
-                                        <option value="365">یک سال گذشته</option>
-                                        <option value="3650">کل سوابق</option>
-                                    </select>
-                                </div>
-                                <div className="md:col-span-1">
-                                    <button 
-                                        onClick={generatePreDemandList} 
-                                        disabled={isPreDemandLoading || !preDemandCustomerId}
-                                        className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 px-4 rounded-lg flex justify-center items-center gap-2 transition shadow disabled:opacity-50 disabled:cursor-not-allowed h-[42px]"
-                                    >
-                                        {isPreDemandLoading ? (
-                                            <span className="spinner w-4 h-4 border-white m-0 border-2"></span>
-                                        ) : (
-                                            <>
-                                                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 002-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></svg>
-                                                تولید لیست پیش‌تقاضا
-                                            </>
-                                        )}
-                                    </button>
-                                </div>
-                            </div>
-
-                            {/* Generated List Section */}
-                            {preDemandItems.length > 0 && (
-                                <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 overflow-hidden">
-                                    <div className="p-4 border-b border-gray-100 dark:border-gray-700 flex justify-between items-center bg-gray-50 dark:bg-gray-900/30">
-                                        <h3 className="font-bold text-gray-800 dark:text-gray-100 flex items-center gap-2">
-                                            <span className="bg-indigo-100 text-indigo-800 dark:bg-indigo-900 dark:text-indigo-200 py-0.5 px-2 rounded-full text-sm font-mono">{preDemandItems.length}</span>
-                                            آیتم پیشنهادی
-                                        </h3>
-                                    </div>
-                                    
-                                    <div className="overflow-x-auto">
-                                        <table className="min-w-full text-sm text-right">
-                                            <thead className="bg-gray-100/50 dark:bg-gray-800/80 text-gray-600 dark:text-gray-400 border-b border-gray-200 dark:border-gray-700">
-                                                <tr>
-                                                    <th className="p-4 font-semibold">محصول</th>
-                                                    <th className="p-4 font-semibold text-center">خرید گذشته</th>
-                                                    <th className="p-4 font-semibold text-center">متوسط ماهانه</th>
-                                                    <th className="p-4 font-semibold text-center w-32">تعداد آفر</th>
-                                                    <th className="p-4 font-semibold">وضعیت بازار (کمترین قیمت‌ها)</th>
-                                                    <th className="p-4 font-semibold text-center">عملیات</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody className="divide-y divide-gray-100 dark:divide-gray-700/50">
-                                                {preDemandItems.map((item) => (
-                                                    <tr key={item.id} className="hover:bg-gray-50/50 dark:hover:bg-gray-700/20 transition-colors">
-                                                        <td className="p-4 font-medium text-gray-800 dark:text-gray-200">
-                                                            <div className="flex items-center gap-3">
-                                                                {item.product?.image_url ? (
-                                                                    <img src={item.product.image_url} loading="lazy" className="w-16 h-16 rounded-md object-cover border border-gray-200 dark:border-gray-600 shadow-sm hover:scale-150 transition-transform duration-300 relative z-10 hover:z-50" />
-                                                                ) : (
-                                                                     <div className="w-16 h-16 rounded-md bg-gray-100 dark:bg-gray-700 flex items-center justify-center text-xs text-gray-400">بدون عکس</div>
-                                                                )}
-                                                                <span>{item.product?.brand?.title} {item.product?.title}</span>
-                                                            </div>
-                                                        </td>
-                                                        <td className="p-4 text-center font-mono text-gray-500 dark:text-gray-400">
-                                                            {item.totalHistoryQty}
-                                                        </td>
-                                                        <td className="p-4 text-center font-mono text-gray-500 dark:text-gray-400">
-                                                            {item.monthlyAvg}
-                                                        </td>
-                                                        <td className="p-4">
-                                                            <input 
-                                                                type="number" 
-                                                                value={item.suggestedQty} 
-                                                                onChange={(e) => handlePreDemandItemQtyChange(item.id, e.target.value)}
-                                                                className="w-full text-center p-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 focus:ring-2 focus:ring-indigo-500 font-mono font-bold"
-                                                                min="0"
-                                                            />
-                                                        </td>
-                                                        <td className="p-4 text-xs font-mono text-gray-500 dark:text-gray-400 leading-relaxed">
-                                                            {item.marketPrices}
-                                                        </td>
-                                                        <td className="p-4 text-center">
-                                                            <button 
-                                                                onClick={() => handleRemovePreDemandItem(item.id)} 
-                                                                className="text-red-400 hover:text-red-600 dark:hover:text-red-400 p-2 rounded-full hover:bg-red-50 dark:hover:bg-red-900/30 transition"
-                                                                title="حذف از لیست"
-                                                            >
-                                                                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm4 0a1 1 0 012 0v6a1 1 0 11-2 0V8z" clipRule="evenodd" /></svg>
-                                                            </button>
-                                                        </td>
-                                                    </tr>
-                                                ))}
-                                            </tbody>
-                                        </table>
-                                    </div>
-                                    
-                                    {/* Action Bottom Bar */}
-                                    <div className="p-4 border-t border-gray-100 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/30 flex flex-col md:flex-row justify-between items-center gap-4">
-                                        <div className="flex flex-wrap gap-2 w-full md:w-auto">
-                                            <button 
-                                                onClick={exportPreDemandToWhatsAppSuppliers}
-                                                className="flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 text-sm font-medium transition shadow-sm"
-                                            >
-                                                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-green-500" viewBox="0 0 20 20" fill="currentColor"><path d="M8 3a1 1 0 011-1h2a1 1 0 110 2H9a1 1 0 01-1-1z" /><path d="M6 3a2 2 0 00-2 2v11a2 2 0 002 2h8a2 2 0 002-2V5a2 2 0 00-2-2 3 3 0 01-3 3H9a3 3 0 01-3-3z" /></svg>
-                                                کپی استعلام تامین‌کننده
-                                            </button>
-                                            <button 
-                                                onClick={exportPreDemandToWhatsAppCustomer}
-                                                className="flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 text-sm font-medium transition shadow-sm"
-                                            >
-                                                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-blue-500" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M18 10c0 3.866-3.582 7-8 7a8.841 8.841 0 01-4.083-.98L2 17l1.338-3.123C2.493 12.767 2 11.434 2 10c0-3.866 3.582-7 8-7s8 3.134 8 7zM7 9H5v2h2V9zm8 0h-2v2h2V9zM9 9h2v2H9V9z" clipRule="evenodd" /></svg>
-                                                کپی آفر مشتری
-                                            </button>
-                                        </div>
-                                        
-                                        <button 
-                                            onClick={convertPreDemandToActualDemand}
-                                            className="w-full md:w-auto px-6 py-2.5 bg-green-600 hover:bg-green-700 text-white rounded-lg font-bold flex items-center justify-center gap-2 transition shadow shadow-green-600/30"
-                                        >
-                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" /></svg>
-                                            تبدیل به تقاضای رسمی
-                                        </button>
-                                    </div>
-                                </div>
-                            )}
-                        </div>
-                    )}
-
-                    {isModalOpen && <DemandFormModal isOpen={isModalOpen} onClose={handleCloseModal} onSave={handleSaveDemand} customers={customers} products={products} defaultStatusId={defaultStatusId} onCustomerCreated={(newCustomer) => { setCustomers(prev => [...prev, newCustomer].sort((a,b) => a.fullname.localeCompare(b.fullname))); }} customerRoleId={customerRoleId} marketingChannels={marketingChannels} provinces={provinces} initialData={demandModalInitialData} isProductsLoading={isProductsLoading} />}
+                    {isModalOpen && <DemandFormModal isOpen={isModalOpen} onClose={handleCloseModal} onSave={handleSaveDemand} customers={customers} products={products} defaultStatusId={defaultStatusId} pendingRegStatusId={pendingRegStatusId} onCustomerCreated={(newCustomer) => { setCustomers(prev => [...prev, newCustomer].sort((a,b) => a.fullname.localeCompare(b.fullname))); }} customerRoleId={customerRoleId} marketingChannels={marketingChannels} provinces={provinces} initialData={demandModalInitialData} isProductsLoading={isProductsLoading} />}
                     {isEditItemModalOpen && <EditDemandItemModal isOpen={isEditItemModalOpen} onClose={handleCloseEditItemModal} onSave={handleSaveItem} onRefresh={fetchDemands} itemToEdit={editingItem} demand={editingDemand} demandStatuses={demandStatuses} groupedStatuses={groupedStatuses} allProfiles={customers} />}
-                    {isManageItemsModalOpen && <ManageDemandItemsModal isOpen={isManageItemsModalOpen} onClose={handleCloseManageItemsModal} onSave={handleSaveManagedItems} demandToEdit={demandToManage} products={products} defaultStatusId={defaultStatusId} isProductsLoading={isProductsLoading} />}
+                    {isManageItemsModalOpen && <ManageDemandItemsModal isOpen={isManageItemsModalOpen} onClose={handleCloseManageItemsModal} onSave={handleSaveManagedItems} demandToEdit={demandToManage} products={products} defaultStatusId={defaultStatusId} pendingRegStatusId={pendingRegStatusId} isProductsLoading={isProductsLoading} />}
                     <ConfirmModal isOpen={confirmState.isOpen} onClose={() => setConfirmState({ isOpen: false, onConfirm: null, message: '', title: '' })} onConfirm={confirmState.onConfirm} title={confirmState.title} message={confirmState.message} />
                     
                     {/* Floating Scroll Buttons */}
