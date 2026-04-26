@@ -414,6 +414,7 @@
         };
 
         const DemandFormModal = ({ isOpen, onClose, onSave, customers, products, defaultStatusId, pendingRegStatusId, onCustomerCreated, customerRoleId, marketingChannels, provinces, initialData, isProductsLoading }) => {
+            const { addToast } = useToasts();
             const [customerId, setCustomerId] = React.useState('');
             const [deadline, setDeadline] = React.useState('');
             const [isEmergency, setIsEmergency] = React.useState(false);
@@ -554,7 +555,7 @@
                                 
                             if (uploadError) {
                                 console.error("Error uploading image:", uploadError);
-                                // Continue without image if upload fails, or we could throw an error here.
+                                addToast("خطا در آپلود عکس: دسترسی ذخیره‌سازی (RLS) در بک‌اند بسته است.", "error");
                             } else {
                                 const { data } = supabaseClient.storage.from('unregistered_products').getPublicUrl(fileName);
                                 imageUrl = data.publicUrl;
@@ -1737,6 +1738,7 @@
         };
 
         const ManageDemandItemsModal = ({ isOpen, onClose, onSave, demandToEdit, products, defaultStatusId, pendingRegStatusId, isProductsLoading }) => {
+            const { addToast } = useToasts();
             const [items, setItems] = React.useState([]);
             const [originalItemIds, setOriginalItemIds] = React.useState(new Set());
             const [error, setError] = React.useState('');
@@ -1811,7 +1813,10 @@
                                 .from('unregistered_products')
                                 .upload(fileName, item.imageFile);
                                 
-                            if (!uploadError && uploadData) {
+                            if (uploadError) {
+                                console.error("Error uploading image:", uploadError);
+                                addToast("خطا در آپلود عکس: دسترسی ذخیره‌سازی (RLS) در بک‌اند بسته است.", "error");
+                            } else if (uploadData) {
                                 const { data } = supabaseClient.storage.from('unregistered_products').getPublicUrl(fileName);
                                 imageUrl = data.publicUrl;
                             }
